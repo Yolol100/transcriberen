@@ -10,26 +10,26 @@ De runtime verzamelt en normaliseert publieke broninhoud zonder account, API-key
 - audio-normalisatie en metadata via `ffmpeg`/`ffprobe`;
 - lokale speech-to-text fallback via `whisper.cpp`;
 - artikelen en pagina's via `Trafilatura`;
-- RSS/Atom- en sitemap-linkdiscovery via `Trafilatura`;
-- SHA-256, toolversies en bronprovenance in ieder resultaat.
+- RSS/Atom- en sitemap-linkdiscovery met de lokale Python/Trafilatura-laag;
+- SHA-256, toolversies, fetchmoment en transformatieprovenance in ieder resultaat.
 
 ## Harde grenzen
 
-- Alleen expliciete publieke `http://`/`https://` bronnen.
+- Alleen expliciete publieke `http://`/`https://` bronnen; private, loopback, link-local en credentialed URLs worden geweigerd.
 - Geen cookies, login, credentials, DRM-bypass, betaalmuur-bypass of private netwerkdoelen.
 - Geen broninhoud automatisch promoveren tot projectwaarheid.
-- Controleer hergebruik-/publicatierechten vóór tekst, audio of media buiten de analysecontext wordt gekopieerd of gebundeld.
-- Een transcript is een transformatie van bronmateriaal en kan fouten bevatten; bewaar bron- en transformatieprovenance.
+- `reuse_allowed` en `rights_basis` zijn expliciete requestvelden. Zonder hergebruiktoestemming bevat het artifact alleen provenance/metadata en een inhoudshash, niet de geëxtraheerde tekst.
+- Een transcript is een transformatie van bronmateriaal en kan fouten bevatten; bron- en transformatieprovenance blijft daarom onderdeel van het resultaat.
 
 ## Toolchain
 
-- `yt-dlp` 2026.07.04, officiële Unix zipimport binary, met ingebouwde EJS-component.
-- Node.js 22.23.2 als JavaScript-runtime voor yt-dlp EJS.
-- FFmpeg/ffprobe uit de GitHub-hosted Ubuntu runtime.
-- `whisper.cpp` v1.8.6, lokaal gebouwd; standaardmodel `base`.
-- Trafilatura 2.1.0 voor artikeltekst, feeds en sitemaps.
+- `yt-dlp` 2026.07.04, officiële immutable releasebinary; SHA-256 wordt vóór gebruik gecontroleerd.
+- FFmpeg/ffprobe uit de GitHub-hosted Ubuntu runtime; de werkelijk gebruikte versie wordt in het resultaat vastgelegd.
+- `whisper.cpp` v1.9.2, officiële Ubuntu x64 releasebinary; SHA-256 wordt gecontroleerd.
+- Whisper `base` model vanaf een vaste Hugging Face-revisie; SHA-256 wordt gecontroleerd. Het model wordt alleen opgehaald als audiofallback expliciet aan staat.
+- Trafilatura 2.1.0 voor artikeltekst en webcontentextractie.
 
-`yt-dlp` wordt met een vastgelegde SHA-256 gecontroleerd. `whisper.cpp` wordt vanaf de vaste release-tag gebouwd. Grote Whisper-modellen en bronmedia worden nooit in Git gecommit.
+Grote Whisper-modellen, ruwe media en gedownloade bronbestanden worden nooit in Git gecommit.
 
 ## Gebruik via ChatGPT/GitHub
 
@@ -46,13 +46,15 @@ Minimaal request:
   "url": "https://example.com/public-source",
   "mode": "auto",
   "language": "nl",
-  "whisper_model": "base"
+  "allow_audio_fallback": false,
+  "reuse_allowed": false,
+  "rights_basis": "analysis-only"
 }
 ```
 
 Ondersteunde `mode`-waarden: `auto`, `media`, `article`, `feed`, `sitemap`.
 
-De workflow uploadt `transcription-result` met genormaliseerde tekst/links, metadata, checksums en een machineleesbaar `result.json`. Ruwe gedownloade media worden niet als artifact bewaard.
+De workflow uploadt `transcription-result-<request_id>` met `result.json`, toolversies en alleen wanneer `reuse_allowed=true` een genormaliseerd `content.md`. Ruwe media worden nooit als artifact bewaard.
 
 ## Bewijsniveau
 
