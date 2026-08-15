@@ -76,7 +76,7 @@ def run(command, *, cwd=None, check=True):
 
 
 def tool_versions():
-    versions = {
+    return {
         "trafilatura": getattr(trafilatura, "__version__", "2.1.0"),
         "yt-dlp": run([str(BIN / "yt-dlp"), "--version"]).stdout.strip(),
         "ffmpeg": run(["ffmpeg", "-version"]).stdout.splitlines()[0].strip(),
@@ -84,7 +84,6 @@ def tool_versions():
         "whisper.cpp": "v1.9.2" if (BIN / "whisper-cli").exists() else "not-installed",
         "whisper_model": "base@5359861c739e955e79d9a303bcbc70fb988958b1" if MODEL.exists() else "not-installed"
     }
-    return versions
 
 
 def normalize_subtitles(path):
@@ -127,9 +126,18 @@ def detect_media(url):
     }
 
 
+def is_public_youtube(url, media_meta=None):
+    extractor = str((media_meta or {}).get("extractor") or "").lower()
+    if "youtube" in extractor:
+        return True
+    host = (urlsplit(str((media_meta or {}).get("webpage_url") or url)).hostname or "").lower().rstrip(".")
+    return host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com")
+
+
 def media_content(req, media_meta=None):
     language = req.get("language", "auto")
     lang_selector = "all,-live_chat" if language == "auto" else f"{language},{language}.*"
+    media_meta = media_meta or detect_media(req["url"])
     with tempfile.TemporaryDirectory(prefix="webactueel-transcribe-") as tmpdir:
         tmp = Path(tmpdir)
         subtitle_cmd = yt_base() + [
@@ -143,13 +151,17 @@ def media_content(req, media_meta=None):
             text = normalize_subtitles(subtitle_file)
             if text:
                 return text, "subtitle", {
-                    "media": media_meta or detect_media(req["url"]),
+                    "media": media_meta,
                     "subtitle_file_type": subtitle_file.suffix.lstrip("."),
                     "subtitle_command_exit": subtitle_run.returncode
                 }, ["yt-dlp:public-subtitles", "normalize:subtitle-lines"]
 
+        if is_public_youtube(req["url"], media_meta):
+            raise RuntimeError("Project Transcriberen policy: public YouTube sources are captions/metadata only; audio/video download and Whisper fallback are forbidden when public captions are unavailable")
         if not req.get("allow_audio_fallback"):
             raise RuntimeError("no usable public subtitles found and allow_audio_fallback=false")
+        if not req.get("audio_access_authorized"):
+            raise RuntimeError("audio fallback requires explicit audio_access_authorized=true")
         if not (BIN / "whisper-cli").exists() or not MODEL.exists():
             raise RuntimeError("whisper.cpp runtime/model not installed")
 
@@ -171,11 +183,12 @@ def media_content(req, media_meta=None):
         if not text:
             raise RuntimeError("whisper.cpp produced empty transcript")
         return text, "whisper", {
-            "media": media_meta or detect_media(req["url"]),
+            "media": media_meta,
             "audio_sha256": sha256_bytes(audio.read_bytes()),
             "audio_bytes": audio.stat().st_size,
-            "model_sha256": sha256_bytes(MODEL.read_bytes())
-        }, ["yt-dlp:audio", "ffmpeg:16khz-mono-wav", "whisper.cpp:base"]
+            "model_sha256": sha256_bytes(MODEL.read_bytes()),
+            "audio_access_authorized": True
+        }, ["yt-dlp:authorized-audio", "ffmpeg:16khz-mono-wav", "whisper.cpp:base"]
 
 
 def parse_xml_links(data, base_url, mode):
@@ -226,7 +239,6 @@ def extract(req):
         media_meta = detect_media(req["url"])
         if mode == "media" or media_meta:
             return media_content(req, media_meta)
-
     data, final_url, content_type = fetch_public(req["url"])
     if mode in {"feed", "sitemap"}:
         return parse_xml_links(data, final_url, mode)
@@ -258,6 +270,7 @@ def main():
         "evidence_level": "controlled_runtime",
         "reuse_allowed": bool(req.get("reuse_allowed")),
         "rights_basis": req.get("rights_basis"),
+        "audio_access_authorized": bool(req.get("audio_access_authorized")),
         "content_sha256": sha256_text(normalized),
         "content_chars": len(normalized),
         "content_persisted": bool(req.get("reuse_allowed")),
@@ -268,6 +281,7 @@ def main():
         "limitations": [
             "Transcriptie en extractie kunnen inhoudelijke fouten bevatten en vereisen bronvergelijking voor belangrijke claims.",
             "controlled_runtime output is geen automatische projectwaarheid.",
+            "Publieke YouTube-bronnen zijn uitsluitend captions/metadata; audio/video-download en Whisper-fallback zijn daar geblokkeerd.",
             "De runtime omzeilt geen login, cookies, DRM of paywalls."
         ]
     }
