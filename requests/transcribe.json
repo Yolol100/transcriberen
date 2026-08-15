@@ -7,6 +7,7 @@
   "mode": "auto",
   "language": "nl",
   "allow_audio_fallback": false,
+  "audio_access_authorized": false,
   "reuse_allowed": false,
   "rights_basis": "analysis-only",
   "requested_by": "template",
