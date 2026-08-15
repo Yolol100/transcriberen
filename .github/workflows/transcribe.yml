@@ -133,7 +133,7 @@ jobs:
           echo "Request: ${{ needs.resolve.outputs.request_id }}" >> "$GITHUB_STEP_SUMMARY"
           echo "Content persistence requested: ${{ needs.resolve.outputs.reuse_allowed }}" >> "$GITHUB_STEP_SUMMARY"
           if [ -f results/result.json ]; then
-            python -c 'import json; r=json.load(open("results/result.json", encoding="utf-8")); print(f"Detected mode: {r.get(\"detected_mode\")}\nEvidence level: {r.get(\"evidence_level\")}\nContent persisted: {r.get(\"content_persisted\")}\nContent SHA-256: {r.get(\"content_sha256\")}")' >> "$GITHUB_STEP_SUMMARY"
+            python -c 'import json; r=json.load(open("results/result.json", encoding="utf-8")); print("Detected mode: {}\nEvidence level: {}\nContent persisted: {}\nContent SHA-256: {}".format(r.get("detected_mode"), r.get("evidence_level"), r.get("content_persisted"), r.get("content_sha256")))' >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Upload normalized result
