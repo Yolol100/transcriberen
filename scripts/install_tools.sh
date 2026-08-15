@@ -7,6 +7,25 @@ BIN_DIR="$ROOT/tools/bin"
 MODEL_DIR="$ROOT/tools/models"
 mkdir -p "$BIN_DIR" "$MODEL_DIR"
 
+DENO_VERSION="v2.9.5"
+DENO_SHA256="8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530"
+DENO_ARCHIVE="${RUNNER_TEMP:-/tmp}/deno-x86_64-unknown-linux-gnu.zip"
+curl -fsSL "https://github.com/denoland/deno/releases/download/${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip" -o "$DENO_ARCHIVE"
+echo "${DENO_SHA256}  $DENO_ARCHIVE" | sha256sum -c -
+python3 - "$DENO_ARCHIVE" "$BIN_DIR" <<'PY'
+import pathlib
+import sys
+import zipfile
+archive = pathlib.Path(sys.argv[1])
+out_dir = pathlib.Path(sys.argv[2])
+with zipfile.ZipFile(archive) as zf:
+    member = zf.getinfo("deno")
+    with zf.open(member) as src, (out_dir / "deno").open("wb") as dst:
+        dst.write(src.read())
+PY
+chmod +x "$BIN_DIR/deno"
+"$BIN_DIR/deno" --version | head -n 1
+
 YT_DLP_VERSION="2026.07.04"
 YT_DLP_SHA256="495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd"
 curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/yt-dlp" -o "$BIN_DIR/yt-dlp.bin"
@@ -16,7 +35,7 @@ cat > "$BIN_DIR/yt-dlp" <<'WRAPPER'
 #!/usr/bin/env bash
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-exec "$HERE/yt-dlp.bin" --js-runtimes node "$@"
+exec "$HERE/yt-dlp.bin" --js-runtimes "deno:$HERE/deno" "$@"
 WRAPPER
 chmod +x "$BIN_DIR/yt-dlp"
 "$BIN_DIR/yt-dlp" --version
