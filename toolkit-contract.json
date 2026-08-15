@@ -10,7 +10,7 @@
   "requires_mcp": false,
   "tools": [
     {"id":"yt-dlp","version":"2026.07.04","sha256":"495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd","trigger_when":"public media metadata/subtitles or authorized non-YouTube media extraction is needed","outputs":["normalized subtitles, metadata or temporary authorized audio"]},
-    {"id":"node-ejs-runtime","version":"22.23.2","trigger_when":"yt-dlp requires local EJS challenge execution","outputs":["local JavaScript challenge execution"]},
+    {"id":"deno-ejs-runtime","version":"2.9.5","sha256":"8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530","trigger_when":"yt-dlp requires local EJS challenge execution","outputs":["local restricted-permission JavaScript challenge execution"]},
     {"id":"ffmpeg","version":"runner-recorded","trigger_when":"explicitly authorized non-YouTube audio normalization is needed","outputs":["temporary 16 kHz mono WAV and media metadata"]},
     {"id":"whisper.cpp","version":"v1.9.2","sha256":"46811a3ecf584307480a220b9ef5ff81b7b22dc41577cbc274ce3afc61f753b1","trigger_when":"authorized non-YouTube audio has no usable subtitles and both audio fallback gates are true","outputs":["local transcript"]},
     {"id":"whisper-base-model","version":"hf-5359861c739e955e79d9a303bcbc70fb988958b1","sha256":"60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe","trigger_when":"authorized whisper.cpp audio fallback is enabled","outputs":["local model runtime only"]},
@@ -19,7 +19,7 @@
   ],
   "usage_assertions": [
     {"tool":"yt-dlp","path":"scripts/install_tools.sh","contains":"YT_DLP_SHA256"},
-    {"tool":"node-ejs-runtime","path":"scripts/install_tools.sh","contains":"--js-runtimes node"},
+    {"tool":"deno-ejs-runtime","path":"scripts/install_tools.sh","contains":"DENO_SHA256"},
     {"tool":"ffmpeg","path":"scripts/runtime.py","contains":"ffmpeg"},
     {"tool":"whisper.cpp","path":"scripts/install_tools.sh","contains":"WHISPER_SHA256"},
     {"tool":"whisper-base-model","path":"scripts/install_tools.sh","contains":"WHISPER_MODEL_SHA256"},
@@ -30,7 +30,7 @@
     "Only public HTTP(S) sources; no login, cookie, credential, DRM, paywall, CAPTCHA or age-control bypass.",
     "Public YouTube is captions-and-metadata only; audio/video download and Whisper fallback are blocked even when audio fallback is otherwise requested.",
     "Non-YouTube Whisper fallback requires allow_audio_fallback=true, audio_access_authorized=true and a concrete authorization/rights_basis.",
-    "The official yt-dlp Unix binary bundles EJS scripts; Node is used locally and remote EJS component downloads are not enabled.",
+    "The official yt-dlp Unix binary bundles EJS scripts; pinned local Deno is used for the JavaScript runtime and remote EJS component downloads are not enabled.",
     "Raw source content is never automatically project truth.",
     "Content is only persisted in artifacts when reuse_allowed=true; otherwise only provenance, metadata and hashes persist.",
     "Audio media and model files are temporary runtime inputs and are never committed to Git.",
