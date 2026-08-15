@@ -26,7 +26,8 @@ De runtime verzamelt en normaliseert toegestane broninhoud zonder nieuw account,
 ## Toolchain
 
 - `yt-dlp` 2026.07.04, officiële immutable releasebinary; SHA-256 wordt vóór gebruik gecontroleerd.
-- Node 22.23.2 als lokale EJS-runtime voor yt-dlp; geen remote EJS-componentdownload.
+- Deno 2.9.5 als gepinde lokale EJS-runtime voor yt-dlp. De officiële Linux x86_64 release-asset wordt op SHA-256 gecontroleerd en via een expliciet lokaal pad aan yt-dlp doorgegeven. Deno is de door yt-dlp aanbevolen runtime en voert de challengecode met beperkte permissies uit.
+- De officiële yt-dlp-binary bevat de benodigde EJS-scripts; remote EJS-componentdownloads zijn niet ingeschakeld.
 - FFmpeg/ffprobe uit de GitHub-hosted Ubuntu runtime; de werkelijk gebruikte versie wordt in het resultaat vastgelegd.
 - `whisper.cpp` v1.9.2, officiële Ubuntu x64 releasebinary; SHA-256 wordt gecontroleerd.
 - Whisper `base` model vanaf een vaste Hugging Face-revisie; SHA-256 wordt gecontroleerd. Het model wordt alleen opgehaald als geautoriseerde audiofallback expliciet aan staat.
