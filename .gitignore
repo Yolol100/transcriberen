@@ -1,0 +1,11 @@
+tools/
+results/
+resolved-request.json
+__pycache__/
+*.pyc
+*.wav
+*.mp3
+*.m4a
+*.mp4
+*.webm
+*.bin

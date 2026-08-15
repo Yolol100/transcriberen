@@ -1,0 +1,17 @@
+{
+  "enabled": false,
+  "request_id": "transcribe-example-001",
+  "owner": "webactueel-workflow",
+  "project_id": "project-transcriberen",
+  "url": "https://example.com/",
+  "mode": "auto",
+  "language": "nl",
+  "allow_audio_fallback": false,
+  "reuse_allowed": false,
+  "rights_basis": "analysis-only",
+  "requested_by": "template",
+  "source_context": {
+    "project_id": "project-transcriberen",
+    "source_set_version": "set-at-execution"
+  }
+}

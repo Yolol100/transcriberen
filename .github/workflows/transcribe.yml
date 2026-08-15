@@ -1,0 +1,146 @@
+name: Transcribe Public Source
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'requests/transcribe.json'
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Publieke HTTP(S)-bron'
+        required: true
+        type: string
+      mode:
+        description: 'auto, media, article, feed of sitemap'
+        required: true
+        default: auto
+        type: choice
+        options: [auto, media, article, feed, sitemap]
+      language:
+        description: 'Taalcode of auto'
+        required: true
+        default: nl
+        type: string
+      allow_audio_fallback:
+        description: 'Gebruik lokale whisper.cpp wanneer geen publieke subtitles beschikbaar zijn'
+        required: true
+        default: false
+        type: boolean
+      reuse_allowed:
+        description: 'Persist genormaliseerde inhoud alleen als hergebruik aantoonbaar is toegestaan'
+        required: true
+        default: false
+        type: boolean
+      rights_basis:
+        description: 'Rechtenbasis; bij reuse_allowed=true geen analysis-only/unknown'
+        required: true
+        default: analysis-only
+        type: string
+      source_set_version:
+        description: 'Actuele Project Transcriberen source_set_version'
+        required: true
+        default: manual-dispatch
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.resolve.outputs.run }}
+      request_id: ${{ steps.resolve.outputs.request_id }}
+      install_whisper: ${{ steps.resolve.outputs.install_whisper }}
+      reuse_allowed: ${{ steps.resolve.outputs.reuse_allowed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve and validate request
+        id: resolve
+        env:
+          REQUEST_FILE: requests/transcribe.json
+          INPUT_URL: ${{ inputs.url }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_LANGUAGE: ${{ inputs.language }}
+          INPUT_ALLOW_AUDIO_FALLBACK: ${{ inputs.allow_audio_fallback }}
+          INPUT_REUSE_ALLOWED: ${{ inputs.reuse_allowed }}
+          INPUT_RIGHTS_BASIS: ${{ inputs.rights_basis }}
+          INPUT_SOURCE_SET_VERSION: ${{ inputs.source_set_version }}
+        run: python3 scripts/resolve_request.py
+      - name: Upload resolved request for runtime job
+        if: steps.resolve.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: resolved-transcription-request
+          path: resolved-request.json
+          retention-days: 1
+          if-no-files-found: error
+
+  runtime:
+    needs: resolve
+    if: needs.resolve.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node 22.23.2 for yt-dlp EJS
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.23.2'
+          package-manager-cache: false
+
+      - name: Download resolved request
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: resolved-transcription-request
+
+      - name: Install locked Python extraction dependency
+        run: python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+
+      - name: Install FFmpeg runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+
+      - name: Install pinned local media/transcription tools
+        run: bash scripts/install_tools.sh '${{ needs.resolve.outputs.install_whisper }}'
+
+      - name: Execute public-source runtime
+        env:
+          REQUEST_FILE: resolved-request.json
+        run: python scripts/runtime.py
+
+      - name: Validate result contract and rights gate
+        run: python scripts/validate_result.py results/result.json
+
+      - name: Publish provenance summary
+        if: always()
+        shell: bash
+        run: |
+          echo '## Transcriberen controlled-runtime' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo "Request: ${{ needs.resolve.outputs.request_id }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Content persistence requested: ${{ needs.resolve.outputs.reuse_allowed }}" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f results/result.json ]; then
+            python -c 'import json; r=json.load(open("results/result.json", encoding="utf-8")); print("Detected mode: {}\nEvidence level: {}\nContent persisted: {}\nContent SHA-256: {}".format(r.get("detected_mode"), r.get("evidence_level"), r.get("content_persisted"), r.get("content_sha256")))' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload normalized result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: transcription-result-${{ needs.resolve.outputs.request_id }}
+          path: results/
+          retention-days: 7
+          if-no-files-found: warn
