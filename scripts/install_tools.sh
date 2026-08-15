@@ -9,8 +9,15 @@ mkdir -p "$BIN_DIR" "$MODEL_DIR"
 
 YT_DLP_VERSION="2026.07.04"
 YT_DLP_SHA256="495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd"
-curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/yt-dlp" -o "$BIN_DIR/yt-dlp"
-echo "${YT_DLP_SHA256}  $BIN_DIR/yt-dlp" | sha256sum -c -
+curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/yt-dlp" -o "$BIN_DIR/yt-dlp.bin"
+echo "${YT_DLP_SHA256}  $BIN_DIR/yt-dlp.bin" | sha256sum -c -
+chmod +x "$BIN_DIR/yt-dlp.bin"
+cat > "$BIN_DIR/yt-dlp" <<'WRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+exec "$HERE/yt-dlp.bin" --js-runtimes node "$@"
+WRAPPER
 chmod +x "$BIN_DIR/yt-dlp"
 "$BIN_DIR/yt-dlp" --version
 
