@@ -21,12 +21,10 @@ BASE = {
     "mode": "article",
     "language": "nl",
     "allow_audio_fallback": False,
+    "audio_access_authorized": False,
     "reuse_allowed": False,
     "rights_basis": "analysis-only",
-    "source_context": {
-        "project_id": "project-transcriberen",
-        "source_set_version": "test-source-set"
-    }
+    "source_context": {"project_id": "project-transcriberen", "source_set_version": "test-source-set"}
 }
 
 
@@ -35,6 +33,7 @@ class RequestContractTests(unittest.TestCase):
     def test_valid_analysis_request(self, _dns):
         request = resolve_request.validate_request(copy.deepcopy(BASE))
         self.assertFalse(request["reuse_allowed"])
+        self.assertFalse(request["audio_access_authorized"])
         self.assertEqual(request["mode"], "article")
 
     @patch.object(resolve_request.socket, "getaddrinfo", return_value=PRIVATE_DNS)
@@ -68,6 +67,32 @@ class RequestContractTests(unittest.TestCase):
         request["rights_basis"] = "publisher explicitly permits reuse"
         validated = resolve_request.validate_request(request)
         self.assertTrue(validated["reuse_allowed"])
+
+    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
+    def test_audio_fallback_requires_explicit_authorization(self, _dns):
+        request = copy.deepcopy(BASE)
+        request["allow_audio_fallback"] = True
+        with self.assertRaisesRegex(ValueError, "audio_access_authorized=true"):
+            resolve_request.validate_request(request)
+
+    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
+    def test_audio_fallback_rejects_analysis_only_rights(self, _dns):
+        request = copy.deepcopy(BASE)
+        request["allow_audio_fallback"] = True
+        request["audio_access_authorized"] = True
+        with self.assertRaisesRegex(ValueError, "authorization/rights_basis"):
+            resolve_request.validate_request(request)
+
+    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
+    def test_authorized_audio_fallback_is_accepted(self, _dns):
+        request = copy.deepcopy(BASE)
+        request["mode"] = "media"
+        request["allow_audio_fallback"] = True
+        request["audio_access_authorized"] = True
+        request["rights_basis"] = "client supplied media and authorized transcription"
+        validated = resolve_request.validate_request(request)
+        self.assertTrue(validated["allow_audio_fallback"])
+        self.assertTrue(validated["audio_access_authorized"])
 
 
 if __name__ == "__main__":

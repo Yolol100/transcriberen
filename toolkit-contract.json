@@ -9,11 +9,11 @@
   "requires_api_key": false,
   "requires_mcp": false,
   "tools": [
-    {"id":"yt-dlp","version":"2026.07.04","sha256":"495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd","trigger_when":"media/subtitle extraction or auto media detection is needed","outputs":["normalized subtitles or temporary audio"]},
-    {"id":"node-ejs-runtime","version":"22.23.2","trigger_when":"yt-dlp requires EJS challenge execution such as full YouTube support","outputs":["local JavaScript challenge execution"]},
-    {"id":"ffmpeg","version":"runner-recorded","trigger_when":"audio normalization is needed","outputs":["temporary 16 kHz mono WAV and media metadata"]},
-    {"id":"whisper.cpp","version":"v1.9.2","sha256":"46811a3ecf584307480a220b9ef5ff81b7b22dc41577cbc274ce3afc61f753b1","trigger_when":"no usable subtitles exist and allow_audio_fallback=true","outputs":["local transcript"]},
-    {"id":"whisper-base-model","version":"hf-5359861c739e955e79d9a303bcbc70fb988958b1","sha256":"60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe","trigger_when":"whisper.cpp audio fallback is enabled","outputs":["local model runtime only"]},
+    {"id":"yt-dlp","version":"2026.07.04","sha256":"495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd","trigger_when":"public media metadata/subtitles or authorized non-YouTube media extraction is needed","outputs":["normalized subtitles, metadata or temporary authorized audio"]},
+    {"id":"node-ejs-runtime","version":"22.23.2","trigger_when":"yt-dlp requires local EJS challenge execution","outputs":["local JavaScript challenge execution"]},
+    {"id":"ffmpeg","version":"runner-recorded","trigger_when":"explicitly authorized non-YouTube audio normalization is needed","outputs":["temporary 16 kHz mono WAV and media metadata"]},
+    {"id":"whisper.cpp","version":"v1.9.2","sha256":"46811a3ecf584307480a220b9ef5ff81b7b22dc41577cbc274ce3afc61f753b1","trigger_when":"authorized non-YouTube audio has no usable subtitles and both audio fallback gates are true","outputs":["local transcript"]},
+    {"id":"whisper-base-model","version":"hf-5359861c739e955e79d9a303bcbc70fb988958b1","sha256":"60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe","trigger_when":"authorized whisper.cpp audio fallback is enabled","outputs":["local model runtime only"]},
     {"id":"trafilatura","version":"2.1.0","trigger_when":"article/html extraction is needed","outputs":["normalized article text"]},
     {"id":"python-source-parser","version":"repo","trigger_when":"RSS/Atom/sitemap parsing or provenance validation is needed","outputs":["normalized discovered links and provenance"]}
   ],
@@ -27,7 +27,9 @@
     {"tool":"python-source-parser","path":"scripts/runtime.py","contains":"xml.etree.ElementTree"}
   ],
   "boundaries": [
-    "Only public HTTP(S) sources; no login, cookie, credential, DRM or paywall bypass.",
+    "Only public HTTP(S) sources; no login, cookie, credential, DRM, paywall, CAPTCHA or age-control bypass.",
+    "Public YouTube is captions-and-metadata only; audio/video download and Whisper fallback are blocked even when audio fallback is otherwise requested.",
+    "Non-YouTube Whisper fallback requires allow_audio_fallback=true, audio_access_authorized=true and a concrete authorization/rights_basis.",
     "The official yt-dlp Unix binary bundles EJS scripts; Node is used locally and remote EJS component downloads are not enabled.",
     "Raw source content is never automatically project truth.",
     "Content is only persisted in artifacts when reuse_allowed=true; otherwise only provenance, metadata and hashes persist.",
