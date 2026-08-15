@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0",
+  "owner_skill": "webactueel-workflow",
+  "owner_mode": "transcribeer",
+  "project_id": "project-transcriberen",
+  "repository": "Yolol100/transcriberen",
+  "evidence_role": "controlled_runtime_public_source_acquisition_and_transcription",
+  "requires_account": false,
+  "requires_api_key": false,
+  "requires_mcp": false,
+  "tools": [
+    {"id":"yt-dlp","version":"2026.07.04","sha256":"495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd","trigger_when":"media/subtitle extraction or auto media detection is needed","outputs":["normalized subtitles or temporary audio"]},
+    {"id":"ffmpeg","version":"runner-recorded","trigger_when":"audio normalization is needed","outputs":["temporary 16 kHz mono WAV and media metadata"]},
+    {"id":"whisper.cpp","version":"v1.9.2","sha256":"46811a3ecf584307480a220b9ef5ff81b7b22dc41577cbc274ce3afc61f753b1","trigger_when":"no usable subtitles exist and allow_audio_fallback=true","outputs":["local transcript"]},
+    {"id":"whisper-base-model","version":"hf-5359861c739e955e79d9a303bcbc70fb988958b1","sha256":"60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe","trigger_when":"whisper.cpp audio fallback is enabled","outputs":["local model runtime only"]},
+    {"id":"trafilatura","version":"2.1.0","trigger_when":"article/html extraction is needed","outputs":["normalized article text"]},
+    {"id":"python-source-parser","version":"repo","trigger_when":"RSS/Atom/sitemap parsing or provenance validation is needed","outputs":["normalized discovered links and provenance"]}
+  ],
+  "usage_assertions": [
+    {"tool":"yt-dlp","path":"scripts/install_tools.sh","contains":"YT_DLP_SHA256"},
+    {"tool":"ffmpeg","path":"scripts/runtime.py","contains":"ffmpeg"},
+    {"tool":"whisper.cpp","path":"scripts/install_tools.sh","contains":"WHISPER_SHA256"},
+    {"tool":"whisper-base-model","path":"scripts/install_tools.sh","contains":"WHISPER_MODEL_SHA256"},
+    {"tool":"trafilatura","path":"requirements.txt","contains":"trafilatura==2.1.0"},
+    {"tool":"python-source-parser","path":"scripts/runtime.py","contains":"xml.etree.ElementTree"}
+  ],
+  "boundaries": [
+    "Only public HTTP(S) sources; no login, cookie, credential, DRM or paywall bypass.",
+    "Raw source content is never automatically project truth.",
+    "Content is only persisted in artifacts when reuse_allowed=true; otherwise only provenance, metadata and hashes persist.",
+    "Audio media and model files are temporary runtime inputs and are never committed to Git.",
+    "All output is at most controlled_runtime evidence and remains subject to Webactueel-workflow source quality, rights, deduplication and currentness gates."
+  ]
+}
