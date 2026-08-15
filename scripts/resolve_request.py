@@ -11,6 +11,7 @@ ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,79}$")
 LANG_RE = re.compile(r"^(?:auto|[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?)$")
 MODES = {"auto", "media", "article", "feed", "sitemap"}
 SECRET_KEY_RE = re.compile(r"(?:token|secret|api[_-]?key|access[_-]?key|password|passwd|authorization|signature|sig|credential)", re.I)
+UNVERIFIED_RIGHTS = {"unknown", "analysis-only", "unverified"}
 
 
 def as_bool(value, default=False):
@@ -55,12 +56,18 @@ def validate_request(req):
     if not LANG_RE.fullmatch(str(req.get("language", "auto"))):
         raise ValueError("invalid language")
     req["allow_audio_fallback"] = as_bool(req.get("allow_audio_fallback"), False)
+    req["audio_access_authorized"] = as_bool(req.get("audio_access_authorized"), False)
     req["reuse_allowed"] = as_bool(req.get("reuse_allowed"), False)
     basis = str(req.get("rights_basis", "")).strip()
     if not basis or len(basis) > 160:
         raise ValueError("rights_basis is required")
-    if req["reuse_allowed"] and basis.lower() in {"unknown", "analysis-only", "unverified"}:
+    if req["reuse_allowed"] and basis.lower() in UNVERIFIED_RIGHTS:
         raise ValueError("reuse_allowed=true requires a concrete verified rights_basis")
+    if req["allow_audio_fallback"]:
+        if not req["audio_access_authorized"]:
+            raise ValueError("audio fallback requires audio_access_authorized=true")
+        if basis.lower() in UNVERIFIED_RIGHTS:
+            raise ValueError("audio fallback requires a concrete authorization/rights_basis")
     context = req.get("source_context")
     if not isinstance(context, dict) or context.get("project_id") != "project-transcriberen" or not str(context.get("source_set_version", "")).strip():
         raise ValueError("valid source_context is required")
@@ -77,6 +84,7 @@ def from_dispatch():
         "mode": os.environ.get("INPUT_MODE", "auto"),
         "language": os.environ.get("INPUT_LANGUAGE", "auto"),
         "allow_audio_fallback": as_bool(os.environ.get("INPUT_ALLOW_AUDIO_FALLBACK"), False),
+        "audio_access_authorized": as_bool(os.environ.get("INPUT_AUDIO_ACCESS_AUTHORIZED"), False),
         "reuse_allowed": as_bool(os.environ.get("INPUT_REUSE_ALLOWED"), False),
         "rights_basis": os.environ.get("INPUT_RIGHTS_BASIS", "analysis-only"),
         "requested_by": "workflow_dispatch",
@@ -98,7 +106,7 @@ def main():
     values = {
         "run": str(run).lower(),
         "request_id": str(req.get("request_id", "none")),
-        "install_whisper": str(bool(req.get("allow_audio_fallback"))).lower(),
+        "install_whisper": str(bool(req.get("allow_audio_fallback") and req.get("audio_access_authorized"))).lower(),
         "reuse_allowed": str(bool(req.get("reuse_allowed"))).lower()
     }
     if out:
