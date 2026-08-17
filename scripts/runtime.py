@@ -24,6 +24,14 @@ MODEL = ROOT / "tools" / "models" / "ggml-base.bin"
 RESULTS = ROOT / "results"
 
 
+class CaptionUnavailableError(RuntimeError):
+    """The public source was reachable, but no usable caption track was exposed."""
+
+
+class CaptionAccessError(RuntimeError):
+    """Caption retrieval failed before availability could be determined reliably."""
+
+
 def sha256_bytes(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -157,7 +165,14 @@ def media_content(req, media_meta=None):
                 }, ["yt-dlp:public-subtitles", "normalize:subtitle-lines"]
 
         if is_public_youtube(req["url"], media_meta):
-            raise RuntimeError("Project Transcriberen policy: public YouTube sources are captions/metadata only; audio/video download and Whisper fallback are forbidden when public captions are unavailable")
+            if subtitle_run.returncode != 0:
+                detail = (subtitle_run.stderr or subtitle_run.stdout).strip()[-1600:] or f"yt-dlp exit {subtitle_run.returncode}"
+                raise CaptionAccessError(
+                    "public YouTube caption access failed before availability could be determined: " + detail
+                )
+            raise CaptionUnavailableError(
+                "public YouTube source is captions/metadata only and exposed no usable public captions"
+            )
         if not req.get("allow_audio_fallback"):
             raise RuntimeError("no usable public subtitles found and allow_audio_fallback=false")
         if not req.get("audio_access_authorized"):
@@ -237,7 +252,7 @@ def extract(req):
     mode = req["mode"]
     if mode in {"media", "auto"}:
         media_meta = detect_media(req["url"])
-        if mode == "media" or media_meta:
+        if mode == "media" or media_meta or (mode == "auto" and is_public_youtube(req["url"])):
             return media_content(req, media_meta)
     data, final_url, content_type = fetch_public(req["url"])
     if mode in {"feed", "sitemap"}:
