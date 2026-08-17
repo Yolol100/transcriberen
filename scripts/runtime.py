@@ -103,7 +103,7 @@ def normalize_subtitles(path):
 
 
 def yt_base():
-    return [str(BIN / "yt-dlp"), "--no-config", "--no-cookies", "--no-netrc", "--no-playlist", "--no-warnings"]
+    return [str(BIN / "yt-dlp"), "--no-config", "--no-cookies", "--no-playlist", "--no-warnings"]
 
 
 def detect_media(url):
