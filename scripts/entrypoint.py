@@ -41,7 +41,7 @@ def discover_youtube_videos(url, maximum):
     collection_url = normalize_collection_url(url)
     command = [
         str(runtime.BIN / "yt-dlp"),
-        "--no-config", "--no-cookies", "--no-netrc", "--no-warnings",
+        "--no-config", "--no-cookies", "--no-warnings",
         "--skip-download", "--flat-playlist", "--dump-json",
     ]
     if maximum > 0:
