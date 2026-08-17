@@ -1,16 +1,13 @@
-name: Temporary YouTube Live Smoke
+name: YouTube Access Diagnostic
 
 on:
-  pull_request:
-    paths:
-      - 'scripts/**'
-      - '.github/workflows/youtube-live-smoke.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  live-youtube:
+  accountless-youtube-check:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -24,28 +21,41 @@ jobs:
         run: python -m pip install --disable-pip-version-check --no-input -r requirements.txt
       - name: Install accountless YouTube toolchain
         run: bash scripts/install_tools.sh false
-      - name: Test direct public timedtext fallback
+      - name: Diagnose public YouTube access without credentials
         run: |
           python - <<'PY'
           import sys
           from pathlib import Path
-          from urllib.request import Request, urlopen
           sys.path.insert(0, str(Path('scripts').resolve()))
           import entrypoint
+          import runtime
 
-          videos = entrypoint.discover_youtube_videos('https://www.youtube.com/@OpenAI', 5)
+          videos = entrypoint.discover_youtube_videos('https://www.youtube.com/@OpenAI', 3)
           print(f'discovered={len(videos)}')
+          blocked = 0
           for video in videos:
-              for host in ('www.youtube.com', 'video.google.com'):
-                  url = f'https://{host}/api/timedtext?type=list&v={video["id"]}' if host == 'www.youtube.com' else f'https://{host}/timedtext?type=list&v={video["id"]}'
-                  try:
-                      with urlopen(Request(url, headers={'User-Agent': 'Mozilla/5.0'}), timeout=15) as response:
-                          body = response.read(100000).decode('utf-8', errors='replace')
-                  except Exception as exc:
-                      print(f'{video["id"]} {host} error={exc}', file=sys.stderr)
-                      continue
-                  print(f'{video["id"]} {host} bytes={len(body)} body={body[:2000]}')
-                  if '<track' in body:
-                      raise SystemExit(0)
-          raise SystemExit('No public timedtext track inventory was available from the GitHub-hosted runner')
+              req = {
+                  'url': video['url'],
+                  'language': 'en',
+                  'allow_audio_fallback': False,
+                  'audio_access_authorized': False,
+              }
+              meta = {
+                  'title': video['title'],
+                  'extractor': 'Youtube',
+                  'webpage_url': video['url'],
+                  'id': video['id'],
+              }
+              try:
+                  text, source_type, _, _ = runtime.media_content(req, meta)
+              except runtime.YoutubeAccessBlocked as exc:
+                  blocked += 1
+                  print(f"access_blocked={video['id']} detail={exc}")
+                  continue
+              except Exception as exc:
+                  print(f"no_captions={video['id']} detail={exc}")
+                  continue
+              print(f"caption_ok={video['id']} source={source_type} chars={len(text)}")
+          if blocked:
+              print(f'YouTube anti-bot access blocked {blocked}/{len(videos)} sampled videos on this runner.')
           PY
