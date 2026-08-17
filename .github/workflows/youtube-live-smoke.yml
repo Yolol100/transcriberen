@@ -29,6 +29,22 @@ jobs:
       - name: Install accountless YouTube toolchain
         run: bash scripts/install_tools.sh false
 
+      - name: Install local PO-token provider candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.config/yt-dlp/plugins"
+          curl -fsSL --retry 3 \
+            'https://github.com/Brainicism/bgutil-ytdlp-pot-provider/releases/download/1.3.1/bgutil-ytdlp-pot-provider.zip' \
+            -o "$HOME/.config/yt-dlp/plugins/bgutil-ytdlp-pot-provider.zip"
+          echo 'b8ceec7f76143da172aaf5ebeec0c2d218e5680c063b931586bca48567069b38  '"$HOME/.config/yt-dlp/plugins/bgutil-ytdlp-pot-provider.zip" | sha256sum -c -
+          git clone --quiet --depth 1 --branch 1.3.1 \
+            https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git \
+            "$HOME/bgutil-ytdlp-pot-provider"
+          test "$(git -C "$HOME/bgutil-ytdlp-pot-provider" rev-parse HEAD)" = '7608dd51ee813b48cf9a6d68c6e42cb197ce10e0'
+          cd "$HOME/bgutil-ytdlp-pot-provider/server"
+          "$GITHUB_WORKSPACE/tools/bin/deno" install --allow-scripts=npm:canvas --frozen
+
       - name: Verify public channel discovery and captions without credentials
         run: |
           python - <<'PY'
