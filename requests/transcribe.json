@@ -6,6 +6,7 @@
   "url": "https://example.com/",
   "mode": "auto",
   "language": "nl",
+  "max_items": 50,
   "allow_audio_fallback": false,
   "audio_access_authorized": false,
   "reuse_allowed": false,
