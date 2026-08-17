@@ -23,9 +23,9 @@ on:
         default: nl
         type: string
       max_items:
-        description: 'Maximum aantal videos bij een YouTube-kanaal of playlist (1-500)'
+        description: '0 = volledig YouTube-kanaal/playlist; anders maximaal 1-5000 videos'
         required: true
-        default: '50'
+        default: '0'
         type: string
       allow_audio_fallback:
         description: 'Gebruik lokale whisper.cpp alleen voor expliciet geautoriseerde niet-YouTube-audio'
@@ -94,7 +94,7 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.run == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 180
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
