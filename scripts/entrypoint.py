@@ -53,15 +53,14 @@ def discover_youtube_videos(url, maximum):
     truncated = False
 
     for target in collection_targets(url):
-        remaining = hard_limit - len(videos)
-        if remaining <= 0:
+        if len(videos) >= hard_limit:
             truncated = True
             break
         command = [
             str(runtime.BIN / "yt-dlp"),
             "--no-config", "--no-cookies", "--no-warnings",
             "--skip-download", "--flat-playlist", "--dump-json",
-            "--playlist-end", str(remaining + 1), target,
+            "--playlist-end", str(hard_limit + 1), target,
         ]
         completed = runtime.run(command, check=False)
         if completed.returncode != 0:
@@ -99,6 +98,32 @@ def discover_youtube_videos(url, maximum):
     return videos
 
 
+def classify_caption_failure(exc):
+    if isinstance(exc, runtime.CaptionUnavailableError):
+        return "no_usable_captions"
+    if isinstance(exc, runtime.CaptionAccessError):
+        return "caption_access_error"
+    return "processing_error"
+
+
+def summarize_items(items):
+    counts = {
+        "captions_collected": sum(1 for item in items if item["status"] == "captions_collected"),
+        "captions_unavailable": sum(1 for item in items if item["status"] == "no_usable_captions"),
+        "caption_access_errors": sum(1 for item in items if item["status"] == "caption_access_error"),
+        "processing_errors": sum(1 for item in items if item["status"] == "processing_error"),
+    }
+    if counts["captions_collected"]:
+        scan_status = "partial" if counts["caption_access_errors"] or counts["processing_errors"] else "captions_collected"
+    elif counts["caption_access_errors"]:
+        scan_status = "source_access_blocked"
+    elif counts["processing_errors"]:
+        scan_status = "processing_error"
+    else:
+        scan_status = "no_usable_captions"
+    return counts, scan_status
+
+
 def collection_content(req):
     maximum = int(req.get("max_items", 0))
     videos = discover_youtube_videos(req["url"], maximum)
@@ -122,7 +147,7 @@ def collection_content(req):
                 "title": video["title"],
                 "url": video["url"],
                 "source_target": video["source_target"],
-                "status": "no_usable_captions",
+                "status": classify_caption_failure(exc),
                 "detail": str(exc)[-1000:],
             })
             continue
@@ -145,24 +170,27 @@ def collection_content(req):
             "metadata": metadata,
             "transformations": transformations,
         })
-    if sections:
-        content = "\n\n---\n\n".join(sections).strip() + "\n"
-    else:
-        content = (
-            "# YouTube collection scan\n\n"
-            "No usable public captions were found in the selected videos. "
-            "See result.json and source-register.json for per-video status.\n"
-        )
+    content = "\n\n---\n\n".join(sections).strip() + "\n" if sections else ""
+    counts, scan_status = summarize_items(items)
     metadata = {
         "collection_targets": collection_targets(req["url"]),
         "requested_items": "all" if maximum == 0 else maximum,
         "discovered_items": len(videos),
-        "captions_collected": sum(1 for item in items if item["status"] == "captions_collected"),
-        "captions_unavailable": sum(1 for item in items if item["status"] != "captions_collected"),
+        **counts,
+        "scan_status": scan_status,
         "items": items,
     }
-    metadata["scan_status"] = "captions_collected" if metadata["captions_collected"] else "no_usable_captions"
     return content, metadata
+
+
+def promotion_status(req, metadata):
+    if not req.get("reuse_allowed"):
+        return "rights_review_required"
+    if metadata["captions_collected"] > 0:
+        return "review_required"
+    if metadata["caption_access_errors"] or metadata["processing_errors"]:
+        return "source_access_blocked"
+    return "no_content"
 
 
 def write_collection_result(req):
@@ -170,7 +198,12 @@ def write_collection_result(req):
     RESULTS.mkdir(parents=True, exist_ok=True)
     started = datetime.now(timezone.utc).isoformat()
     content, metadata = collection_content(req)
-    normalized = content.strip() + "\n"
+    normalized = content.strip() + "\n" if content.strip() else ""
+    content_available = metadata["captions_collected"] > 0
+    content_persisted = bool(req.get("reuse_allowed")) and content_available
+    transformations = ["yt-dlp:collection-discovery"]
+    if content_available:
+        transformations.extend(["yt-dlp:public-subtitles", "normalize:subtitle-lines"])
     result = {
         "schema_version": "webactueel-transcription-result/1.0",
         "request_id": req["request_id"],
@@ -188,13 +221,13 @@ def write_collection_result(req):
         "audio_access_authorized": False,
         "content_sha256": runtime.sha256_text(normalized),
         "content_chars": len(normalized),
-        "content_persisted": bool(req.get("reuse_allowed")),
+        "content_persisted": content_persisted,
         "metadata": metadata,
-        "transformations": ["yt-dlp:collection-discovery", "yt-dlp:public-subtitles", "normalize:subtitle-lines"],
+        "transformations": transformations,
         "tool_versions": runtime.tool_versions(),
         "source_context": req.get("source_context"),
         "limitations": [
-            "Only public captions are collected; videos without usable captions are recorded as unavailable.",
+            "Only public captions are collected; videos that expose no usable captions are recorded separately from access/tool failures.",
             "Channel roots are scanned across public videos, Shorts and stream archives and deduplicated by video ID.",
             "The result is review material and is not automatically promoted to project truth or a Skill.",
             "Public YouTube audio/video download and Whisper fallback remain disabled.",
@@ -215,11 +248,11 @@ def write_collection_result(req):
         "project_id": "project-transcriberen",
         "source_url": req["url"],
         "source_kind": "youtube_collection",
-        "promotion_status": "review_required" if req.get("reuse_allowed") else "rights_review_required",
+        "promotion_status": promotion_status(req, metadata),
         "reuse_allowed": bool(req.get("reuse_allowed")),
         "rights_basis": req.get("rights_basis"),
-        "content_available": bool(req.get("reuse_allowed")) and metadata["captions_collected"] > 0,
-        "content_path": "content.md" if req.get("reuse_allowed") else None,
+        "content_available": content_available,
+        "content_path": "content.md" if content_persisted else None,
         "source_register_path": "source-register.json",
         "source_items": metadata["items"],
         "next_action": (
@@ -228,8 +261,11 @@ def write_collection_result(req):
             "fresh readback/hash, backup, validation and rollback."
         ),
     }
-    if req.get("reuse_allowed"):
-        (RESULTS / "content.md").write_text(normalized, encoding="utf-8")
+    content_path = RESULTS / "content.md"
+    if content_persisted:
+        content_path.write_text(normalized, encoding="utf-8")
+    elif content_path.exists():
+        content_path.unlink()
     (RESULTS / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (RESULTS / "source-register.json").write_text(json.dumps(source_register, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (RESULTS / "knowledge-handoff.json").write_text(json.dumps(handoff, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -239,6 +275,7 @@ def write_collection_result(req):
         "mode": "youtube_collection",
         "items": len(metadata["items"]),
         "captions_collected": metadata["captions_collected"],
+        "scan_status": metadata["scan_status"],
     }))
 
 
