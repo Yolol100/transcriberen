@@ -111,9 +111,10 @@ def collection_content(req):
             "metadata": metadata,
             "transformations": transformations,
         })
-    if not sections:
-        raise RuntimeError("No usable public captions found in the selected YouTube channel/playlist range")
-    content = "\n\n---\n\n".join(sections).strip() + "\n"
+    if sections:
+        content = "\n\n---\n\n".join(sections).strip() + "\n"
+    else:
+        content = "# YouTube collection scan\n\nNo usable public captions were found in the selected videos. See result.json and knowledge-handoff.json for per-video status.\n"
     metadata = {
         "collection_url": normalize_collection_url(req["url"]),
         "requested_items": "all" if maximum == 0 else maximum,
@@ -122,6 +123,7 @@ def collection_content(req):
         "captions_unavailable": sum(1 for item in items if item["status"] != "captions_collected"),
         "items": items,
     }
+    metadata["scan_status"] = "captions_collected" if metadata["captions_collected"] else "no_usable_captions"
     return content, metadata
 
 
@@ -170,7 +172,7 @@ def write_collection_result(req):
         "promotion_status": "review_required",
         "reuse_allowed": bool(req.get("reuse_allowed")),
         "rights_basis": req.get("rights_basis"),
-        "content_available": bool(req.get("reuse_allowed")),
+        "content_available": bool(req.get("reuse_allowed")) and metadata["captions_collected"] > 0,
         "content_path": "content.md" if req.get("reuse_allowed") else None,
         "source_items": metadata["items"],
         "next_action": "Review, deduplicate, paraphrase, and route accepted insights to exactly one canonical project source or Skill owner before any write.",
