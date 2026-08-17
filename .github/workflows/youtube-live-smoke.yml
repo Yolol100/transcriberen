@@ -1,0 +1,64 @@
+name: Temporary YouTube Live Smoke
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/youtube-live-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  live-youtube:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python 3.12
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Install Python dependency
+        run: python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+      - name: Install accountless YouTube toolchain
+        run: bash scripts/install_tools.sh false
+      - name: Verify public channel discovery and captions without credentials
+        run: |
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path('scripts').resolve()))
+          import entrypoint
+          import runtime
+
+          channel = 'https://www.youtube.com/@OpenAI'
+          videos = entrypoint.discover_youtube_videos(channel, 10)
+          print(f'discovered={len(videos)}')
+          failures = []
+          for video in videos:
+              req = {
+                  'url': video['url'],
+                  'language': 'en',
+                  'allow_audio_fallback': False,
+                  'audio_access_authorized': False,
+              }
+              meta = {
+                  'title': video['title'],
+                  'extractor': 'Youtube',
+                  'webpage_url': video['url'],
+                  'id': video['id'],
+              }
+              try:
+                  text, source_type, _, _ = runtime.media_content(req, meta)
+              except Exception as exc:
+                  failures.append(f"{video['id']}: {exc}")
+                  continue
+              assert text.strip(), 'caption text is empty'
+              assert source_type == 'subtitle'
+              print(f"caption_ok={video['id']} chars={len(text)}")
+              raise SystemExit(0)
+          print('\n'.join(failures[-10:]), file=sys.stderr)
+          raise SystemExit('No usable public caption track found in the first 10 channel videos')
+          PY
