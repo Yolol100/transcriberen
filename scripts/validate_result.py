@@ -37,6 +37,23 @@ if result.get("detected_mode") == "youtube_collection":
         errors.append("youtube collection items")
     if metadata.get("scan_status") not in {"captions_collected", "no_usable_captions"}:
         errors.append("youtube collection scan_status")
+    targets = metadata.get("collection_targets")
+    if not isinstance(targets, list) or not targets:
+        errors.append("youtube collection targets")
+
+    register_path = Path("results/source-register.json")
+    if not register_path.is_file():
+        errors.append("source-register.json required for youtube_collection")
+    else:
+        try:
+            register = json.loads(register_path.read_text(encoding="utf-8"))
+        except Exception:
+            errors.append("source register json")
+        else:
+            if register.get("schema_version") != "webactueel-source-register/1.0": errors.append("source register schema")
+            if register.get("request_id") != result.get("request_id"): errors.append("source register request_id")
+            if not isinstance(register.get("sources"), list): errors.append("source register sources")
+
     handoff_path = Path("results/knowledge-handoff.json")
     if not handoff_path.is_file():
         errors.append("knowledge-handoff.json required for youtube_collection")
@@ -48,7 +65,9 @@ if result.get("detected_mode") == "youtube_collection":
         else:
             if handoff.get("schema_version") != "webactueel-knowledge-handoff/1.0": errors.append("knowledge handoff schema")
             if handoff.get("request_id") != result.get("request_id"): errors.append("knowledge handoff request_id")
-            if handoff.get("promotion_status") != "review_required": errors.append("knowledge handoff promotion_status")
+            expected_status = "review_required" if result.get("reuse_allowed") else "rights_review_required"
+            if handoff.get("promotion_status") != expected_status: errors.append("knowledge handoff promotion_status")
+            if handoff.get("source_register_path") != "source-register.json": errors.append("knowledge handoff source register")
             if not isinstance(handoff.get("source_items"), list): errors.append("knowledge handoff source_items")
 
 if errors:
