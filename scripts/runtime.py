@@ -17,11 +17,16 @@ import trafilatura
 
 SECRET_KEY_RE = re.compile(r"(?:token|secret|api[_-]?key|access[_-]?key|password|passwd|authorization|signature|sig|credential)", re.I)
 TIMING_RE = re.compile(r"\d{1,2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{1,2}:\d{2}:\d{2}[,.]\d{3}")
+YOUTUBE_BLOCK_RE = re.compile(r"sign in to confirm you.?re not a bot|requestblocked|ipblocked", re.I)
 USER_AGENT = "Webactueel-Transcriberen/1.0 (+controlled public-source runtime)"
 ROOT = Path(os.environ.get("GITHUB_WORKSPACE", Path.cwd()))
 BIN = ROOT / "tools" / "bin"
 MODEL = ROOT / "tools" / "models" / "ggml-base.bin"
 RESULTS = ROOT / "results"
+
+
+class YoutubeAccessBlocked(RuntimeError):
+    pass
 
 
 def sha256_bytes(data):
@@ -106,6 +111,10 @@ def yt_base():
     return [str(BIN / "yt-dlp"), "--no-config", "--no-cookies", "--no-playlist", "--no-warnings"]
 
 
+def youtube_access_blocked(stderr):
+    return bool(YOUTUBE_BLOCK_RE.search(str(stderr or "")))
+
+
 def detect_media(url):
     cmd = yt_base() + ["--simulate", "--dump-single-json", url]
     completed = run(cmd, check=False)
@@ -157,7 +166,11 @@ def media_content(req, media_meta=None):
                 }, ["yt-dlp:public-subtitles", "normalize:subtitle-lines"]
 
         if is_public_youtube(req["url"], media_meta):
-            raise RuntimeError("Project Transcriberen policy: public YouTube sources are captions/metadata only; audio/video download and Whisper fallback are forbidden when public captions are unavailable")
+            if youtube_access_blocked(subtitle_run.stderr):
+                raise YoutubeAccessBlocked("YouTube blocked this runtime/IP with its anti-bot access check; no account, cookies, proxy, API key, PO-token provider, or bypass was used")
+            detail = re.sub(r"\s+", " ", (subtitle_run.stderr or "").strip())[-1200:]
+            suffix = f"; yt-dlp detail: {detail}" if detail else ""
+            raise RuntimeError("Project Transcriberen policy: public YouTube sources are captions/metadata only; no usable public captions were returned and audio/video download plus Whisper fallback are forbidden" + suffix)
         if not req.get("allow_audio_fallback"):
             raise RuntimeError("no usable public subtitles found and allow_audio_fallback=false")
         if not req.get("audio_access_authorized"):
