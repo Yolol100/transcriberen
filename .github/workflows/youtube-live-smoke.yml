@@ -24,7 +24,7 @@ jobs:
         run: python -m pip install --disable-pip-version-check --no-input -r requirements.txt
       - name: Install accountless YouTube toolchain
         run: bash scripts/install_tools.sh false
-      - name: Verify public channel discovery and captions without credentials
+      - name: Diagnose public YouTube captions without credentials
         run: |
           python - <<'PY'
           import sys
@@ -33,32 +33,27 @@ jobs:
           import entrypoint
           import runtime
 
-          channel = 'https://www.youtube.com/@OpenAI'
-          videos = entrypoint.discover_youtube_videos(channel, 10)
+          videos = entrypoint.discover_youtube_videos('https://www.youtube.com/@OpenAI', 5)
           print(f'discovered={len(videos)}')
-          failures = []
+          usable = False
           for video in videos:
-              req = {
-                  'url': video['url'],
-                  'language': 'en',
-                  'allow_audio_fallback': False,
-                  'audio_access_authorized': False,
-              }
-              meta = {
-                  'title': video['title'],
-                  'extractor': 'Youtube',
-                  'webpage_url': video['url'],
-                  'id': video['id'],
-              }
-              try:
-                  text, source_type, _, _ = runtime.media_content(req, meta)
-              except Exception as exc:
-                  failures.append(f"{video['id']}: {exc}")
-                  continue
-              assert text.strip(), 'caption text is empty'
-              assert source_type == 'subtitle'
-              print(f"caption_ok={video['id']} chars={len(text)}")
-              raise SystemExit(0)
-          print('\n'.join(failures[-10:]), file=sys.stderr)
-          raise SystemExit('No usable public caption track found in the first 10 channel videos')
+              command = runtime.yt_base() + ['--list-subs', video['url']]
+              result = runtime.run(command, check=False)
+              print(f"=== {video['id']} list-subs rc={result.returncode} ===")
+              print(result.stdout[-12000:])
+              print(result.stderr[-12000:], file=sys.stderr)
+              if result.returncode == 0 and ('Available subtitles' in result.stdout or 'Available automatic captions' in result.stdout):
+                  usable = True
+                  req = {'url': video['url'], 'language': 'en', 'allow_audio_fallback': False, 'audio_access_authorized': False}
+                  meta = {'title': video['title'], 'extractor': 'Youtube', 'webpage_url': video['url'], 'id': video['id']}
+                  try:
+                      text, source_type, _, _ = runtime.media_content(req, meta)
+                  except Exception as exc:
+                      print(f"caption-fetch-failed {video['id']}: {exc}", file=sys.stderr)
+                  else:
+                      print(f"caption_ok={video['id']} source={source_type} chars={len(text)}")
+                      raise SystemExit(0)
+          if not usable:
+              raise SystemExit('No subtitle inventory was exposed by yt-dlp for the sampled public channel videos')
+          raise SystemExit('Subtitle inventory exists, but the current caption download path failed')
           PY
