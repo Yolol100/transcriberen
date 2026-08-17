@@ -31,6 +31,26 @@ content = Path("results/content.md")
 if result.get("reuse_allowed") and not content.is_file(): errors.append("content.md required when reuse_allowed=true")
 if not result.get("reuse_allowed") and content.exists(): errors.append("content.md forbidden when reuse_allowed=false")
 
+if result.get("detected_mode") == "youtube_collection":
+    metadata = result.get("metadata", {})
+    if not isinstance(metadata.get("items"), list) or not metadata.get("items"):
+        errors.append("youtube collection items")
+    if int(metadata.get("captions_collected", 0)) < 1:
+        errors.append("youtube collection captions")
+    handoff_path = Path("results/knowledge-handoff.json")
+    if not handoff_path.is_file():
+        errors.append("knowledge-handoff.json required for youtube_collection")
+    else:
+        try:
+            handoff = json.loads(handoff_path.read_text(encoding="utf-8"))
+        except Exception:
+            errors.append("knowledge handoff json")
+        else:
+            if handoff.get("schema_version") != "webactueel-knowledge-handoff/1.0": errors.append("knowledge handoff schema")
+            if handoff.get("request_id") != result.get("request_id"): errors.append("knowledge handoff request_id")
+            if handoff.get("promotion_status") != "review_required": errors.append("knowledge handoff promotion_status")
+            if not isinstance(handoff.get("source_items"), list): errors.append("knowledge handoff source_items")
+
 if errors:
     print("result validation failed: " + ", ".join(errors), file=sys.stderr)
     raise SystemExit(1)
