@@ -24,6 +24,18 @@ def as_bool(value, default=False):
     raise ValueError("boolean expected")
 
 
+def as_int(value, default, minimum, maximum):
+    if value is None or value == "":
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("integer expected") from exc
+    if parsed < minimum or parsed > maximum:
+        raise ValueError(f"integer must be between {minimum} and {maximum}")
+    return parsed
+
+
 def validate_public_url(raw):
     parts = urlsplit(str(raw))
     if parts.scheme not in {"http", "https"} or not parts.hostname:
@@ -55,6 +67,7 @@ def validate_request(req):
         raise ValueError("invalid mode")
     if not LANG_RE.fullmatch(str(req.get("language", "auto"))):
         raise ValueError("invalid language")
+    req["max_items"] = as_int(req.get("max_items"), 50, 1, 500)
     req["allow_audio_fallback"] = as_bool(req.get("allow_audio_fallback"), False)
     req["audio_access_authorized"] = as_bool(req.get("audio_access_authorized"), False)
     req["reuse_allowed"] = as_bool(req.get("reuse_allowed"), False)
@@ -83,6 +96,7 @@ def from_dispatch():
         "url": os.environ.get("INPUT_URL", ""),
         "mode": os.environ.get("INPUT_MODE", "auto"),
         "language": os.environ.get("INPUT_LANGUAGE", "auto"),
+        "max_items": as_int(os.environ.get("INPUT_MAX_ITEMS"), 50, 1, 500),
         "allow_audio_fallback": as_bool(os.environ.get("INPUT_ALLOW_AUDIO_FALLBACK"), False),
         "audio_access_authorized": as_bool(os.environ.get("INPUT_AUDIO_ACCESS_AUTHORIZED"), False),
         "reuse_allowed": as_bool(os.environ.get("INPUT_REUSE_ALLOWED"), False),
