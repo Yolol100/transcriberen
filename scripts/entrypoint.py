@@ -42,9 +42,11 @@ def discover_youtube_videos(url, maximum):
     command = [
         str(runtime.BIN / "yt-dlp"),
         "--no-config", "--no-cookies", "--no-netrc", "--no-warnings",
-        "--skip-download", "--flat-playlist", "--playlist-end", str(maximum), "--dump-json",
-        collection_url,
+        "--skip-download", "--flat-playlist", "--dump-json",
     ]
+    if maximum > 0:
+        command.extend(["--playlist-end", str(maximum)])
+    command.append(collection_url)
     completed = runtime.run(command, check=False)
     if completed.returncode != 0:
         raise RuntimeError("yt-dlp could not enumerate the YouTube channel/playlist: " + completed.stderr[-3000:])
@@ -70,7 +72,7 @@ def discover_youtube_videos(url, maximum):
 
 
 def collection_content(req):
-    maximum = int(req.get("max_items", 50))
+    maximum = int(req.get("max_items", 0))
     videos = discover_youtube_videos(req["url"], maximum)
     sections = []
     items = []
@@ -114,7 +116,7 @@ def collection_content(req):
     content = "\n\n---\n\n".join(sections).strip() + "\n"
     metadata = {
         "collection_url": normalize_collection_url(req["url"]),
-        "requested_items": maximum,
+        "requested_items": "all" if maximum == 0 else maximum,
         "discovered_items": len(videos),
         "captions_collected": sum(1 for item in items if item["status"] == "captions_collected"),
         "captions_unavailable": sum(1 for item in items if item["status"] != "captions_collected"),
