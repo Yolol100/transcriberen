@@ -88,8 +88,9 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/install_tools.sh false
-          tools/bin/yt-dlp --version | grep -Fx '2026.07.04'
-          tools/bin/deno --version | grep -m1 -F 'deno 2.9.5'
+          test "$(tools/bin/yt-dlp --version)" = '2026.07.04'
+          tools/bin/deno --version > /tmp/deno-version.txt
+          grep -F 'deno 2.9.5' /tmp/deno-version.txt
           command -v ffmpeg
           command -v ffprobe
           ffmpeg -version
