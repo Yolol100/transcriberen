@@ -12,6 +12,15 @@ RESULTS = runtime.RESULTS
 YOUTUBE_VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 
+def youtube_host(url):
+    return (urlsplit(str(url)).hostname or "").lower().rstrip(".")
+
+
+def is_youtube_url(url):
+    host = youtube_host(url)
+    return host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com")
+
+
 def is_youtube_collection_url(url):
     parts = urlsplit(str(url))
     host = (parts.hostname or "").lower().rstrip(".")
@@ -35,6 +44,18 @@ def normalize_collection_url(url):
     if stripped.endswith(("/videos", "/streams", "/shorts", "/featured")):
         return stripped
     return stripped + "/videos"
+
+
+def video_id_from_url(url):
+    parts = urlsplit(str(url))
+    host = (parts.hostname or "").lower().rstrip(".")
+    if host == "youtu.be":
+        candidate = parts.path.strip("/").split("/", 1)[0]
+    else:
+        candidate = (parse_qs(parts.query).get("v") or [""])[0]
+        if not candidate and parts.path.startswith("/shorts/"):
+            candidate = parts.path.split("/", 3)[2]
+    return candidate if YOUTUBE_VIDEO_ID.fullmatch(candidate or "") else None
 
 
 def discover_youtube_videos(url, maximum):
@@ -90,38 +111,18 @@ def collection_content(req):
         try:
             text, source_type, metadata, transformations = runtime.media_content(item_req, media_meta)
         except runtime.YoutubeAccessBlocked as exc:
-            items.append({
-                "index": index,
-                "video_id": video["id"],
-                "title": video["title"],
-                "url": video["url"],
-                "status": "access_blocked",
-                "detail": str(exc)[-1000:],
-            })
+            items.append({"index": index, "video_id": video["id"], "title": video["title"], "url": video["url"], "status": "access_blocked", "detail": str(exc)[-1000:]})
             continue
         except Exception as exc:
-            items.append({
-                "index": index,
-                "video_id": video["id"],
-                "title": video["title"],
-                "url": video["url"],
-                "status": "no_usable_captions",
-                "detail": str(exc)[-1000:],
-            })
+            items.append({"index": index, "video_id": video["id"], "title": video["title"], "url": video["url"], "status": "no_usable_captions", "detail": str(exc)[-1000:]})
             continue
         normalized = text.strip() + "\n"
         sections.append(f"# {video['title']}\n\n- Video: {video['url']}\n- Video-ID: `{video['id']}`\n\n{normalized}")
         items.append({
-            "index": index,
-            "video_id": video["id"],
-            "title": video["title"],
-            "url": video["url"],
-            "status": "captions_collected",
-            "caption_source": source_type,
-            "content_sha256": runtime.sha256_text(normalized),
-            "content_chars": len(normalized),
-            "metadata": metadata,
-            "transformations": transformations,
+            "index": index, "video_id": video["id"], "title": video["title"], "url": video["url"],
+            "status": "captions_collected", "caption_source": source_type,
+            "content_sha256": runtime.sha256_text(normalized), "content_chars": len(normalized),
+            "metadata": metadata, "transformations": transformations,
         })
     if sections:
         content = "\n\n---\n\n".join(sections).strip() + "\n"
@@ -147,13 +148,18 @@ def collection_content(req):
     return content, metadata
 
 
-def write_collection_result(req):
-    runtime.validate_public_url(req["url"])
-    RESULTS.mkdir(parents=True, exist_ok=True)
-    started = datetime.now(timezone.utc).isoformat()
-    content, metadata = collection_content(req)
+def promotion_status(scan_status):
+    if scan_status == "access_blocked":
+        return "blocked"
+    if scan_status == "no_usable_captions":
+        return "no_content"
+    return "review_required"
+
+
+def write_youtube_artifacts(req, *, source_kind, content, metadata, transformations):
     normalized = content.strip() + "\n"
-    persist_content = bool(req.get("reuse_allowed")) and metadata["captions_collected"] > 0
+    persist_content = bool(req.get("reuse_allowed")) and int(metadata.get("captions_collected", 0)) > 0
+    status = metadata["scan_status"]
     result = {
         "schema_version": "webactueel-transcription-result/1.0",
         "request_id": req["request_id"],
@@ -161,9 +167,9 @@ def write_collection_result(req):
         "project_id": "project-transcriberen",
         "source_url": req["url"],
         "requested_mode": req["mode"],
-        "detected_mode": "youtube_collection",
+        "detected_mode": source_kind,
         "language": req.get("language", "auto"),
-        "fetched_at": started,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
         "completed_at": datetime.now(timezone.utc).isoformat(),
         "evidence_level": "controlled_runtime",
         "reuse_allowed": bool(req.get("reuse_allowed")),
@@ -173,44 +179,86 @@ def write_collection_result(req):
         "content_chars": len(normalized),
         "content_persisted": persist_content,
         "metadata": metadata,
-        "transformations": ["yt-dlp:collection-discovery", "yt-dlp:public-subtitles", "normalize:subtitle-lines"],
+        "transformations": transformations,
         "tool_versions": runtime.tool_versions(),
         "source_context": req.get("source_context"),
         "limitations": [
-            "Only public captions are collected; videos without usable captions are recorded as unavailable.",
+            "Only public captions are collected; unavailable captions are recorded rather than replaced with downloaded YouTube audio.",
             "The result is review material and is not automatically promoted to project truth or a Skill.",
             "Public YouTube audio/video download and Whisper fallback remain disabled.",
             "The runtime does not bypass login, cookies, DRM, paywalls, CAPTCHA, anti-bot access checks, age controls, or private access.",
         ],
     }
-    blocked = metadata["scan_status"] == "access_blocked"
+    handoff_status = promotion_status(status)
     handoff = {
         "schema_version": "webactueel-knowledge-handoff/1.0",
         "request_id": req["request_id"],
         "owner": "webactueel-workflow",
         "project_id": "project-transcriberen",
         "source_url": req["url"],
-        "source_kind": "youtube_collection",
-        "promotion_status": "blocked" if blocked else "review_required",
+        "source_kind": source_kind,
+        "promotion_status": handoff_status,
         "reuse_allowed": bool(req.get("reuse_allowed")),
         "rights_basis": req.get("rights_basis"),
         "content_available": persist_content,
         "content_path": "content.md" if persist_content else None,
         "source_items": metadata["items"],
-        "next_action": (
-            "Do not promote source or Skill updates. Re-run from an allowed public runtime/network without adding accounts, cookies, proxies, API keys, or bypasses."
-            if blocked else
-            "Review, deduplicate, paraphrase, and route accepted insights to exactly one canonical project source or Skill owner before any write."
-        ),
+        "next_action": {
+            "blocked": "Do not promote source or Skill updates. Re-run from an allowed public runtime/network without adding accounts, cookies, proxies, API keys, or bypasses.",
+            "no_content": "No source or Skill update is available because no usable public captions were returned.",
+            "review_required": "Review, deduplicate, paraphrase, and route accepted insights to exactly one canonical project source or Skill owner before any write.",
+        }[handoff_status],
     }
+    RESULTS.mkdir(parents=True, exist_ok=True)
     if persist_content:
         (RESULTS / "content.md").write_text(normalized, encoding="utf-8")
     (RESULTS / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (RESULTS / "knowledge-handoff.json").write_text(json.dumps(handoff, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (RESULTS / "tool-versions.txt").write_text("\n".join(f"{key}={value}" for key, value in result["tool_versions"].items()) + "\n", encoding="utf-8")
-    print(json.dumps({"request_id": req["request_id"], "mode": "youtube_collection", "scan_status": metadata["scan_status"], "items": len(metadata["items"]), "captions_collected": metadata["captions_collected"]}))
-    if blocked:
+    print(json.dumps({"request_id": req["request_id"], "mode": source_kind, "scan_status": status, "items": len(metadata["items"]), "captions_collected": metadata["captions_collected"]}))
+    if status == "access_blocked":
         raise SystemExit("YouTube blocked caption access from this runtime/IP; result artifacts were written and source/Skill promotion is blocked")
+
+
+def write_collection_result(req):
+    runtime.validate_public_url(req["url"])
+    content, metadata = collection_content(req)
+    write_youtube_artifacts(
+        req,
+        source_kind="youtube_collection",
+        content=content,
+        metadata=metadata,
+        transformations=["yt-dlp:collection-discovery", "yt-dlp:public-subtitles", "normalize:subtitle-lines"],
+    )
+
+
+def write_single_youtube_result(req):
+    runtime.validate_public_url(req["url"])
+    video_id = video_id_from_url(req["url"])
+    media_meta = {"extractor": "Youtube", "webpage_url": req["url"], "id": video_id}
+    try:
+        text, source_type, source_metadata, transformations = runtime.media_content(req, media_meta)
+    except runtime.YoutubeAccessBlocked as exc:
+        content = "# YouTube video scan\n\nNo reusable caption content was collected because YouTube blocked this runtime/IP.\n"
+        item = {"index": 1, "video_id": video_id, "url": req["url"], "status": "access_blocked", "detail": str(exc)[-1000:]}
+        metadata = {"scan_status": "access_blocked", "discovered_items": 1, "captions_collected": 0, "captions_unavailable": 0, "access_blocked_items": 1, "items": [item]}
+        write_youtube_artifacts(req, source_kind="youtube_video", content=content, metadata=metadata, transformations=["yt-dlp:public-subtitles"])
+        return
+    except Exception as exc:
+        content = "# YouTube video scan\n\nNo usable public captions were returned for this video.\n"
+        item = {"index": 1, "video_id": video_id, "url": req["url"], "status": "no_usable_captions", "detail": str(exc)[-1000:]}
+        metadata = {"scan_status": "no_usable_captions", "discovered_items": 1, "captions_collected": 0, "captions_unavailable": 1, "access_blocked_items": 0, "items": [item]}
+        write_youtube_artifacts(req, source_kind="youtube_video", content=content, metadata=metadata, transformations=["yt-dlp:public-subtitles"])
+        return
+    normalized = text.strip() + "\n"
+    item = {
+        "index": 1, "video_id": video_id, "url": req["url"], "status": "captions_collected",
+        "caption_source": source_type, "content_sha256": runtime.sha256_text(normalized), "content_chars": len(normalized),
+        "metadata": source_metadata, "transformations": transformations,
+    }
+    metadata = {"scan_status": "captions_collected", "discovered_items": 1, "captions_collected": 1, "captions_unavailable": 0, "access_blocked_items": 0, "items": [item]}
+    content = f"# YouTube video\n\n- Video: {req['url']}\n" + (f"- Video-ID: `{video_id}`\n" if video_id else "") + f"\n{normalized}"
+    write_youtube_artifacts(req, source_kind="youtube_video", content=content, metadata=metadata, transformations=transformations)
 
 
 def main():
@@ -218,6 +266,8 @@ def main():
     req = json.loads(request_path.read_text(encoding="utf-8"))
     if is_youtube_collection_url(req["url"]):
         write_collection_result(req)
+    elif is_youtube_url(req["url"]):
+        write_single_youtube_result(req)
     else:
         runtime.main()
 
