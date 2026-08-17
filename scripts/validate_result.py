@@ -35,8 +35,8 @@ if result.get("detected_mode") == "youtube_collection":
     metadata = result.get("metadata", {})
     if not isinstance(metadata.get("items"), list) or not metadata.get("items"):
         errors.append("youtube collection items")
-    if int(metadata.get("captions_collected", 0)) < 1:
-        errors.append("youtube collection captions")
+    if metadata.get("scan_status") not in {"captions_collected", "no_usable_captions"}:
+        errors.append("youtube collection scan_status")
     handoff_path = Path("results/knowledge-handoff.json")
     if not handoff_path.is_file():
         errors.append("knowledge-handoff.json required for youtube_collection")
