@@ -9,6 +9,7 @@ path = Path(sys.argv[1] if len(sys.argv) > 1 else "results/result.json")
 result = json.loads(path.read_text(encoding="utf-8"))
 errors = []
 hex64 = re.compile(r"^[0-9a-f]{64}$")
+youtube_modes = {"youtube_collection", "youtube_video"}
 
 if result.get("schema_version") != "webactueel-transcription-result/1.0": errors.append("schema_version")
 if result.get("owner") != "webactueel-workflow": errors.append("owner")
@@ -28,8 +29,8 @@ if result.get("detected_mode") == "whisper" and (host == "youtu.be" or host == "
     errors.append("public YouTube may not use whisper")
 
 content = Path("results/content.md")
-if result.get("detected_mode") == "youtube_collection":
-    metadata = result.get("metadata", {})
+metadata = result.get("metadata", {})
+if result.get("detected_mode") in youtube_modes:
     expected_persisted = bool(result.get("reuse_allowed")) and int(metadata.get("captions_collected", 0)) > 0
 else:
     expected_persisted = bool(result.get("reuse_allowed"))
@@ -37,16 +38,17 @@ if result.get("content_persisted") is not expected_persisted: errors.append("con
 if expected_persisted and not content.is_file(): errors.append("content.md required when content_persisted=true")
 if not expected_persisted and content.exists(): errors.append("content.md forbidden when content_persisted=false")
 
-if result.get("detected_mode") == "youtube_collection":
-    metadata = result.get("metadata", {})
+if result.get("detected_mode") in youtube_modes:
+    mode = result.get("detected_mode")
     if not isinstance(metadata.get("items"), list) or not metadata.get("items"):
-        errors.append("youtube collection items")
+        errors.append("youtube items")
     valid_scan_statuses = {"captions_collected", "partial_captions_access_blocked", "no_usable_captions", "access_blocked"}
-    if metadata.get("scan_status") not in valid_scan_statuses:
-        errors.append("youtube collection scan_status")
+    scan_status = metadata.get("scan_status")
+    if scan_status not in valid_scan_statuses:
+        errors.append("youtube scan_status")
     handoff_path = Path("results/knowledge-handoff.json")
     if not handoff_path.is_file():
-        errors.append("knowledge-handoff.json required for youtube_collection")
+        errors.append("knowledge-handoff.json required for YouTube result")
     else:
         try:
             handoff = json.loads(handoff_path.read_text(encoding="utf-8"))
@@ -55,12 +57,18 @@ if result.get("detected_mode") == "youtube_collection":
         else:
             if handoff.get("schema_version") != "webactueel-knowledge-handoff/1.0": errors.append("knowledge handoff schema")
             if handoff.get("request_id") != result.get("request_id"): errors.append("knowledge handoff request_id")
-            expected_promotion = "blocked" if metadata.get("scan_status") == "access_blocked" else "review_required"
+            if handoff.get("source_kind") != mode: errors.append("knowledge handoff source_kind")
+            expected_promotion = {
+                "access_blocked": "blocked",
+                "no_usable_captions": "no_content",
+                "captions_collected": "review_required",
+                "partial_captions_access_blocked": "review_required",
+            }.get(scan_status)
             if handoff.get("promotion_status") != expected_promotion: errors.append("knowledge handoff promotion_status")
             if not isinstance(handoff.get("source_items"), list): errors.append("knowledge handoff source_items")
             if handoff.get("content_available") is not expected_persisted: errors.append("knowledge handoff content_available")
-            if metadata.get("scan_status") == "access_blocked" and handoff.get("content_path") is not None:
-                errors.append("blocked handoff may not expose content_path")
+            if scan_status in {"access_blocked", "no_usable_captions"} and handoff.get("content_path") is not None:
+                errors.append("non-promotable handoff may not expose content_path")
 
 if errors:
     print("result validation failed: " + ", ".join(errors), file=sys.stderr)
