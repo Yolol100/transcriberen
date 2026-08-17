@@ -4,7 +4,17 @@ import sys
 import types
 import unittest
 
-runtime = types.SimpleNamespace(RESULTS=pathlib.Path("results"), BIN=pathlib.Path("tools/bin"))
+
+class YoutubeAccessBlocked(RuntimeError):
+    pass
+
+
+runtime = types.SimpleNamespace(
+    RESULTS=pathlib.Path("results"),
+    BIN=pathlib.Path("tools/bin"),
+    YoutubeAccessBlocked=YoutubeAccessBlocked,
+    youtube_access_blocked=lambda stderr: "not a bot" in str(stderr).lower(),
+)
 sys.modules.setdefault("runtime", runtime)
 MODULE_PATH = pathlib.Path(__file__).parents[1] / "scripts" / "entrypoint.py"
 spec = importlib.util.spec_from_file_location("entrypoint", MODULE_PATH)
@@ -53,6 +63,30 @@ class YoutubeCollectionTests(unittest.TestCase):
         entrypoint.discover_youtube_videos("https://www.youtube.com/@OpenAI", 25)
         index = captured["command"].index("--playlist-end")
         self.assertEqual(captured["command"][index + 1], "25")
+
+    def test_collection_discovery_classifies_antibot_block(self):
+        def fake_run(command, check=False):
+            return types.SimpleNamespace(returncode=1, stdout="", stderr="Sign in to confirm you're not a bot")
+
+        entrypoint.runtime.run = fake_run
+        with self.assertRaises(YoutubeAccessBlocked):
+            entrypoint.discover_youtube_videos("https://www.youtube.com/@OpenAI", 10)
+
+    def test_all_blocked_videos_mark_scan_as_access_blocked(self):
+        entrypoint.discover_youtube_videos = lambda url, maximum: [{
+            "id": "abcdefghijk",
+            "title": "One",
+            "url": "https://www.youtube.com/watch?v=abcdefghijk",
+        }]
+
+        def blocked(*args, **kwargs):
+            raise YoutubeAccessBlocked("blocked")
+
+        entrypoint.runtime.media_content = blocked
+        _, metadata = entrypoint.collection_content({"url": "https://www.youtube.com/@OpenAI", "max_items": 0})
+        self.assertEqual(metadata["scan_status"], "access_blocked")
+        self.assertEqual(metadata["access_blocked_items"], 1)
+        self.assertEqual(metadata["captions_collected"], 0)
 
 
 if __name__ == "__main__":
