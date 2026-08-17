@@ -3,6 +3,7 @@ import pathlib
 import sys
 import types
 import unittest
+from unittest.mock import patch
 
 
 class YoutubeAccessBlocked(RuntimeError):
@@ -54,8 +55,8 @@ class YoutubeCollectionTests(unittest.TestCase):
             captured["command"] = command
             return types.SimpleNamespace(returncode=0, stdout='{"id":"abcdefghijk","title":"One"}\n', stderr="")
 
-        entrypoint.runtime.run = fake_run
-        videos = entrypoint.discover_youtube_videos("https://www.youtube.com/@OpenAI", 0)
+        with patch.object(entrypoint.runtime, "run", fake_run):
+            videos = entrypoint.discover_youtube_videos("https://www.youtube.com/@OpenAI", 0)
         self.assertEqual(len(videos), 1)
         self.assertNotIn("--playlist-end", captured["command"])
         self.assertIn("--skip-download", captured["command"])
@@ -67,8 +68,8 @@ class YoutubeCollectionTests(unittest.TestCase):
             captured["command"] = command
             return types.SimpleNamespace(returncode=0, stdout='{"id":"abcdefghijk","title":"One"}\n', stderr="")
 
-        entrypoint.runtime.run = fake_run
-        entrypoint.discover_youtube_videos("https://www.youtube.com/@OpenAI", 25)
+        with patch.object(entrypoint.runtime, "run", fake_run):
+            entrypoint.discover_youtube_videos("https://www.youtube.com/@OpenAI", 25)
         index = captured["command"].index("--playlist-end")
         self.assertEqual(captured["command"][index + 1], "25")
 
@@ -76,12 +77,12 @@ class YoutubeCollectionTests(unittest.TestCase):
         def fake_run(command, check=False):
             return types.SimpleNamespace(returncode=1, stdout="", stderr="Sign in to confirm you're not a bot")
 
-        entrypoint.runtime.run = fake_run
-        with self.assertRaises(YoutubeAccessBlocked):
-            entrypoint.discover_youtube_videos("https://www.youtube.com/@OpenAI", 10)
+        with patch.object(entrypoint.runtime, "run", fake_run):
+            with self.assertRaises(YoutubeAccessBlocked):
+                entrypoint.discover_youtube_videos("https://www.youtube.com/@OpenAI", 10)
 
     def test_all_blocked_videos_mark_scan_as_access_blocked(self):
-        entrypoint.discover_youtube_videos = lambda url, maximum: [{
+        videos = [{
             "id": "abcdefghijk",
             "title": "One",
             "url": "https://www.youtube.com/watch?v=abcdefghijk",
@@ -90,8 +91,8 @@ class YoutubeCollectionTests(unittest.TestCase):
         def blocked(*args, **kwargs):
             raise YoutubeAccessBlocked("blocked")
 
-        entrypoint.runtime.media_content = blocked
-        _, metadata = entrypoint.collection_content({"url": "https://www.youtube.com/@OpenAI", "max_items": 0})
+        with patch.object(entrypoint, "discover_youtube_videos", return_value=videos), patch.object(entrypoint.runtime, "media_content", blocked):
+            _, metadata = entrypoint.collection_content({"url": "https://www.youtube.com/@OpenAI", "max_items": 0})
         self.assertEqual(metadata["scan_status"], "access_blocked")
         self.assertEqual(metadata["access_blocked_items"], 1)
         self.assertEqual(metadata["captions_collected"], 0)
