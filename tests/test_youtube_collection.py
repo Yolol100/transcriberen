@@ -29,8 +29,16 @@ class YoutubeCollectionTests(unittest.TestCase):
     def test_playlist_is_collection(self):
         self.assertTrue(entrypoint.is_youtube_collection_url("https://www.youtube.com/playlist?list=PL123"))
 
-    def test_single_video_is_not_collection(self):
-        self.assertFalse(entrypoint.is_youtube_collection_url("https://www.youtube.com/watch?v=abcdefghijk"))
+    def test_single_video_is_youtube_but_not_collection(self):
+        url = "https://www.youtube.com/watch?v=abcdefghijk"
+        self.assertTrue(entrypoint.is_youtube_url(url))
+        self.assertFalse(entrypoint.is_youtube_collection_url(url))
+        self.assertEqual(entrypoint.video_id_from_url(url), "abcdefghijk")
+
+    def test_short_youtube_url_extracts_video_id(self):
+        url = "https://youtu.be/abcdefghijk"
+        self.assertTrue(entrypoint.is_youtube_url(url))
+        self.assertEqual(entrypoint.video_id_from_url(url), "abcdefghijk")
 
     def test_channel_normalizes_to_videos_tab(self):
         self.assertEqual(entrypoint.normalize_collection_url("https://www.youtube.com/@OpenAI"), "https://www.youtube.com/@OpenAI/videos")
@@ -87,6 +95,12 @@ class YoutubeCollectionTests(unittest.TestCase):
         self.assertEqual(metadata["scan_status"], "access_blocked")
         self.assertEqual(metadata["access_blocked_items"], 1)
         self.assertEqual(metadata["captions_collected"], 0)
+
+    def test_promotion_status_requires_content_or_blocks(self):
+        self.assertEqual(entrypoint.promotion_status("captions_collected"), "review_required")
+        self.assertEqual(entrypoint.promotion_status("partial_captions_access_blocked"), "review_required")
+        self.assertEqual(entrypoint.promotion_status("no_usable_captions"), "no_content")
+        self.assertEqual(entrypoint.promotion_status("access_blocked"), "blocked")
 
 
 if __name__ == "__main__":
