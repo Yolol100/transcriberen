@@ -22,6 +22,11 @@ on:
         required: true
         default: nl
         type: string
+      max_items:
+        description: 'Maximum aantal videos bij een YouTube-kanaal of playlist (1-500)'
+        required: true
+        default: '50'
+        type: string
       allow_audio_fallback:
         description: 'Gebruik lokale whisper.cpp alleen voor expliciet geautoriseerde niet-YouTube-audio'
         required: true
@@ -69,6 +74,7 @@ jobs:
           INPUT_URL: ${{ inputs.url }}
           INPUT_MODE: ${{ inputs.mode }}
           INPUT_LANGUAGE: ${{ inputs.language }}
+          INPUT_MAX_ITEMS: ${{ inputs.max_items }}
           INPUT_ALLOW_AUDIO_FALLBACK: ${{ inputs.allow_audio_fallback }}
           INPUT_AUDIO_ACCESS_AUTHORIZED: ${{ inputs.audio_access_authorized }}
           INPUT_REUSE_ALLOWED: ${{ inputs.reuse_allowed }}
@@ -119,7 +125,7 @@ jobs:
       - name: Execute public-source runtime
         env:
           REQUEST_FILE: resolved-request.json
-        run: python scripts/runtime.py
+        run: python scripts/entrypoint.py
 
       - name: Validate result contract and rights gate
         run: python scripts/validate_result.py results/result.json
