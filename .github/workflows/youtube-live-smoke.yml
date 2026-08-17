@@ -33,6 +33,7 @@ jobs:
         run: |
           python - <<'PY'
           import sys
+          import tempfile
           from pathlib import Path
 
           sys.path.insert(0, str(Path('scripts').resolve()))
@@ -67,6 +68,18 @@ jobs:
                   text, source_type, _, _ = runtime.media_content(req, meta)
               except Exception as exc:
                   failures.append(f"{video['id']}: {exc}")
+                  if len(failures) == 1:
+                      with tempfile.TemporaryDirectory(prefix='yt-dlp-caption-diag-') as tmpdir:
+                          diag = runtime.run(runtime.yt_base() + [
+                              '--verbose', '--write-subs', '--write-auto-subs',
+                              '--sub-langs', 'en,en.*', '--sub-format', 'srt/vtt/best',
+                              '--skip-download', '-o', str(Path(tmpdir) / 'source.%(ext)s'),
+                              video['url'],
+                          ], check=False)
+                          print('--- first caption diagnostic stdout ---', file=sys.stderr)
+                          print(diag.stdout[-4000:], file=sys.stderr)
+                          print('--- first caption diagnostic stderr ---', file=sys.stderr)
+                          print(diag.stderr[-8000:], file=sys.stderr)
                   continue
               assert text.strip(), 'caption text is empty'
               assert source_type == 'subtitle'
