@@ -29,11 +29,13 @@
   "boundaries": [
     "Only public HTTP(S) sources; no login, cookie, credential, DRM, paywall, CAPTCHA or age-control bypass.",
     "Public YouTube is captions-and-metadata only; audio/video download and Whisper fallback are blocked even when audio fallback is otherwise requested.",
+    "YouTube channel roots are enumerated across public videos, Shorts and stream archives and deduplicated by video ID; playlists are enumerated as one collection.",
+    "Shared cloud IPs can receive upstream YouTube LOGIN_REQUIRED/bot challenges before captions are exposed; the runtime reports unavailable captions instead of using hidden cookies, proxy, account or external transcript fallback.",
     "Non-YouTube Whisper fallback requires allow_audio_fallback=true, audio_access_authorized=true and a concrete authorization/rights_basis.",
     "The official yt-dlp Unix binary bundles EJS scripts; pinned local Deno is used for the JavaScript runtime and remote EJS component downloads are not enabled.",
-    "Raw source content is never automatically project truth.",
+    "Raw source content is never automatically project truth or automatically written to a Skill.",
     "Content is only persisted in artifacts when reuse_allowed=true; otherwise only provenance, metadata and hashes persist.",
     "Audio media and model files are temporary runtime inputs and are never committed to Git.",
-    "All output is at most controlled_runtime evidence and remains subject to Webactueel-workflow source quality, rights, deduplication and currentness gates."
+    "All output is at most controlled_runtime evidence and remains subject to Webactueel-workflow source quality, rights, deduplication, currentness and controlled-write gates."
   ]
 }
