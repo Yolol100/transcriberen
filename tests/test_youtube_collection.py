@@ -10,11 +10,17 @@ class YoutubeAccessBlocked(RuntimeError):
     pass
 
 
+def _unpatched(*args, **kwargs):
+    raise AssertionError("runtime stub was called without a test patch")
+
+
 runtime = types.SimpleNamespace(
     RESULTS=pathlib.Path("results"),
     BIN=pathlib.Path("tools/bin"),
     YoutubeAccessBlocked=YoutubeAccessBlocked,
     youtube_access_blocked=lambda stderr: "not a bot" in str(stderr).lower(),
+    run=_unpatched,
+    media_content=_unpatched,
 )
 sys.modules.setdefault("runtime", runtime)
 MODULE_PATH = pathlib.Path(__file__).parents[1] / "scripts" / "entrypoint.py"
