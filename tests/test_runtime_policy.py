@@ -26,6 +26,11 @@ class RuntimePolicyTests(unittest.TestCase):
         self.assertIn("--no-cookies", args)
         self.assertIn("--no-config", args)
 
+    def test_youtube_antibot_error_is_classified(self):
+        self.assertTrue(runtime.youtube_access_blocked("Sign in to confirm you're not a bot"))
+        self.assertTrue(runtime.youtube_access_blocked("RequestBlocked"))
+        self.assertFalse(runtime.youtube_access_blocked("There are no subtitles for the requested languages"))
+
 
 if __name__ == "__main__":
     unittest.main()
