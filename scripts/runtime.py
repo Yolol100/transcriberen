@@ -104,9 +104,11 @@ def normalize_subtitles(path):
 
 
 def yt_base():
+    # Netrc authentication is opt-in in yt-dlp. Do not pass the removed
+    # --no-netrc option; omission is the accountless/default-safe behavior.
     # This base is intentionally single-item only. Playlist/channel/search
     # discovery is isolated in youtube_runtime and never inherits --no-playlist.
-    return [str(BIN / "yt-dlp"), "--no-config", "--no-cookies", "--no-netrc", "--no-playlist", "--no-warnings"]
+    return [str(BIN / "yt-dlp"), "--no-config", "--no-cookies", "--no-playlist", "--no-warnings"]
 
 
 def detect_media(url):
@@ -303,9 +305,13 @@ def main():
             "youtube": {
                 "scope": index["scope"],
                 "query": index.get("query"),
+                "collection_status": index["collection_status"],
                 "candidate_count": index["candidate_count"],
                 "eligible_count": index["eligible_count"],
+                "selected_count": index["selected_count"],
                 "item_count": index["item_count"],
+                "transcript_count": index["transcript_count"],
+                "discovery_possibly_truncated": bool(index.get("discovery", {}).get("possibly_truncated")),
                 "sort_by": index["sort_by"],
                 "year_from": index.get("year_from"),
                 "year_to": index.get("year_to"),
@@ -316,7 +322,7 @@ def main():
         }
         result = common_result(
             req, started, normalized, "youtube", metadata,
-            ["yt-dlp:youtube-discovery", "yt-dlp:metadata-only", "yt-dlp:single-selected-caption", "normalize:subtitle-lines", "optional:public-comments"]
+            ["yt-dlp:youtube-discovery", "yt-dlp:metadata-only", "yt-dlp:single-selected-caption", "normalize:subtitle-cues", "optional:public-comments"]
         )
     else:
         content, detected_mode, metadata, transformations = extract(req)
