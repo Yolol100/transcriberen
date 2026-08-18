@@ -1,36 +1,38 @@
 {
   "enabled": false,
-  "request_id": "transcribe-example-001",
+  "request_id": "example-request-disabled",
   "owner": "webactueel-workflow",
   "project_id": "project-transcriberen",
   "url": "https://www.youtube.com/watch?v=VIDEO_ID",
   "mode": "youtube",
   "language": "auto",
+  "allow_audio_fallback": false,
+  "audio_access_authorized": false,
+  "analysis_content_allowed": false,
+  "reuse_allowed": false,
+  "rights_basis": "analysis-paraphrase-only",
+  "youtube_access_basis": "unverified",
+  "public_request_acknowledged": false,
   "youtube": {
     "scope": "video",
-    "query": "",
     "sort_by": "relevance",
-    "max_items": 20,
+    "max_items": 1,
     "candidate_limit": 100,
     "scan_limit": 500,
     "allow_unbounded": false,
-    "year_from": null,
-    "year_to": null,
-    "min_views": null,
-    "min_likes": null,
-    "min_comments": null,
     "include_comments": false,
     "comment_sort": "top",
-    "max_comments": "200"
+    "max_comments": "200",
+    "comment_selection": "platform",
+    "comment_review_limit": 50
   },
-  "allow_audio_fallback": false,
-  "audio_access_authorized": false,
-  "analysis_content_allowed": true,
-  "reuse_allowed": false,
-  "rights_basis": "analysis-paraphrase-only",
-  "requested_by": "template",
+  "knowledge_context": {
+    "goal": "",
+    "target_owner": "webactueel-workflow",
+    "keywords": []
+  },
   "source_context": {
     "project_id": "project-transcriberen",
-    "source_set_version": "1.9.0-youtube-scenario-completeness"
+    "source_set_version": "2.0.0-audit-hardening"
   }
 }
