@@ -12,10 +12,11 @@ LANG_RE = re.compile(r"^(?:auto|[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,16})?)$")
 MODES = {"auto", "media", "article", "feed", "sitemap", "youtube"}
 YT_SCOPES = {"video", "short", "search", "playlist", "channel_videos", "channel_shorts", "channel_all"}
 YT_BULK_SCOPES = {"playlist", "channel_videos", "channel_shorts", "channel_all"}
-YT_SORTS = {"relevance", "views", "likes", "comments", "newest"}
+YT_SORTS = {"relevance", "views", "likes", "comments", "newest", "random"}
 COMMENT_SORTS = {"top", "new"}
 SECRET_KEY_RE = re.compile(r"(?:token|secret|api[_-]?key|access[_-]?key|password|passwd|authorization|signature|sig|credential)", re.I)
 UNVERIFIED_RIGHTS = {"unknown", "unverified"}
+SOURCE_SET_PLACEHOLDERS = {"manual-dispatch", "set-at-execution", "unknown", "unset", "placeholder"}
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
 
 
@@ -182,8 +183,11 @@ def validate_request(req):
             raise ValueError("audio fallback requires a concrete authorization/rights_basis")
 
     context = req.get("source_context")
-    if not isinstance(context, dict) or context.get("project_id") != "project-transcriberen" or not str(context.get("source_set_version", "")).strip():
+    source_set_version = str((context or {}).get("source_set_version", "")).strip()
+    if not isinstance(context, dict) or context.get("project_id") != "project-transcriberen" or not source_set_version:
         raise ValueError("valid source_context is required")
+    if source_set_version.casefold() in SOURCE_SET_PLACEHOLDERS:
+        raise ValueError("source_context.source_set_version must name a concrete current source set")
     return req
 
 
@@ -222,7 +226,7 @@ def from_dispatch():
         "requested_by": "workflow_dispatch",
         "source_context": {
             "project_id": "project-transcriberen",
-            "source_set_version": os.environ.get("INPUT_SOURCE_SET_VERSION", "manual-dispatch")
+            "source_set_version": os.environ.get("INPUT_SOURCE_SET_VERSION", "")
         }
     }
 
