@@ -67,6 +67,7 @@
   ],
   "boundaries": [
     "Only public HTTP(S) sources and accountless public YouTube discovery; no login, cookie, credential, DRM, paywall, CAPTCHA or age-control bypass.",
+    "An upstream public-YouTube anti-bot/access denial is reported as access_blocked evidence; the runtime does not answer it by enabling cookies, login, proxying or media fallback.",
     "Public YouTube is captions, metadata and optional public comments only; audio/video download and Whisper fallback are blocked.",
     "Automatic YouTube caption choice is English, then Dutch, then the first other available language; manual captions beat automatic captions within the same language.",
     "Auto-translated YouTube caption variants are rejected using yt-dlp translated_subs skipping plus a local tlang URL guard for known metadata edge cases.",
