@@ -9,6 +9,7 @@ Accountloze controlled-runtime voor `project-transcriberen`. De repository verza
 - Auto-vertaalde YouTube-captions worden via yt-dlp `skip=translated_subs` én een lokale `tlang`-controle uitgesloten.
 - WebVTT/SRT wordt cue-gericht opgeschoond; VTT-metadata, inline timestamps, markup en rolling auto-caption overlap worden verwijderd.
 - Zonder bruikbare caption wordt een item `no_captions`; publieke YouTube gebruikt nooit Whisper/mediafallback.
+- Als YouTube accountloze publieke toegang blokkeert met een anti-botchallenge, rapporteert de runtime `access_blocked`; hij schakelt dan geen cookies, login, proxy of mediafallback in.
 - Zoekresultaten kunnen lokaal worden gefilterd op jaar en minimale views/likes/comments en gerangschikt op relevantie, views, likes, comments of nieuwste upload.
 - Ranking geldt alleen binnen de werkelijk gescande kandidaatset. `youtube-index.json` vermeldt daarom expliciet of discovery mogelijk begrensd was.
 - Publieke comments zijn analyse-evidence. Persistente comment-artifacts verwijderen standaard auteursnaam/-id; commenttekst zelf kan nog persoonsgegevens bevatten en blijft taakgebonden.
@@ -150,7 +151,7 @@ De workflow publiceert `transcription-result-<request_id>` met:
 - `items/<video-id>/comments.json` wanneer comments zijn aangevraagd en analyse/reuse-persistence is toegestaan; directe auteursnaam/-id worden niet opgeslagen;
 - `content.md`: samengestelde transcriptinput voor downstream kennisreview.
 
-De resultvalidator controleert naast het hoofdcontract ook count-consistentie, transcript/content-hashes, itemmetadata, comment-identiteitsminimalisatie en dat er geen audio/video-bestanden in het result-artifact terechtkomen.
+De resultvalidator controleert naast het hoofdcontract ook count-consistentie, transcript/content-hashes, itemmetadata, comment-identiteitsminimalisatie en dat er geen audio/video-bestanden in het result-artifact terechtkomen. `collection_status=access_blocked` is geldige negatieve evidence wanneer de upstream dienst accountloze publieke toegang weigert.
 
 `analysis_content_allowed=true` betekent alleen kortstondige verwerking voor analyse/parafrase. Het geeft geen herpublicatie- of hergebruiksrecht. `reuse_allowed=true` blijft een aparte poort met concrete rechtenbasis.
 
@@ -160,4 +161,4 @@ De repository bepaalt niet zelfstandig welke tekst een Skill of projectbron moet
 
 ## Technische grens
 
-YouTube verandert regelmatig. yt-dlp ondersteunt search, playlists, tabs, captions en comments, maar een accountloze openbare extractor kan niet garanderen dat ieder item/comment altijd toegankelijk blijft. De runtime rapporteert fouten en begrenzingen expliciet en gebruikt voor publieke YouTube nooit mediafallback.
+YouTube verandert regelmatig. yt-dlp ondersteunt search, playlists, tabs, captions en comments, maar een accountloze openbare extractor kan niet garanderen dat ieder item/comment altijd toegankelijk blijft. Tijdens de live audit op GitHub-hosted runners blokkeerde YouTube de accountloze extractie met een anti-botchallenge. De runtime behandelt dat als `access_blocked` en stopt veilig; cookies, login, CAPTCHA-omzeiling, proxying en mediafallback zijn geen automatische herstelroute. Positieve live acquisitie blijft daarom afhankelijk van een normale toegestane runtimeomgeving waarin YouTube accountloze publieke toegang daadwerkelijk accepteert.
