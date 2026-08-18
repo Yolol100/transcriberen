@@ -104,15 +104,19 @@ def normalize_subtitles(path):
 
 
 def yt_base():
+    # Netrc authentication is opt-in in yt-dlp. Do not pass the removed
+    # --no-netrc option; omission is the accountless/default-safe behavior.
     # This base is intentionally single-item only. Playlist/channel/search
     # discovery is isolated in youtube_runtime and never inherits --no-playlist.
-    return [str(BIN / "yt-dlp"), "--no-config", "--no-cookies", "--no-netrc", "--no-playlist", "--no-warnings"]
+    return [str(BIN / "yt-dlp"), "--no-config", "--no-cookies", "--no-playlist", "--no-warnings"]
 
 
 def detect_media(url):
     cmd = yt_base() + ["--simulate", "--dump-single-json", url]
     completed = run(cmd, check=False)
     if completed.returncode != 0 or not completed.stdout.strip():
+        if youtube_runtime.is_youtube_url(url) and is_youtube_access_blocked_error(completed.stderr):
+            raise RuntimeError("youtube_access_blocked: " + completed.stderr[-2000:])
         return None
     try:
         meta = json.loads(completed.stdout)
@@ -134,6 +138,79 @@ def is_public_youtube(url, media_meta=None):
     if "youtube" in extractor:
         return True
     return youtube_runtime.is_youtube_url((media_meta or {}).get("webpage_url") or url)
+
+
+YOUTUBE_ACCESS_BLOCK_PATTERNS = (
+    "sign in to confirm you’re not a bot",
+    "sign in to confirm you're not a bot",
+    "confirm you’re not a bot",
+    "confirm you're not a bot",
+)
+
+
+def is_youtube_access_blocked_error(value):
+    message = str(value or "").casefold()
+    return any(pattern in message for pattern in YOUTUBE_ACCESS_BLOCK_PATTERNS)
+
+
+def blocked_youtube_collection(req, error, results_dir=None):
+    results_dir = Path(results_dir or RESULTS)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    yt = req.get("youtube") or {}
+    scope = yt.get("scope", "video")
+    scan_limit = None if scope == "search" else int(yt.get("scan_limit", 500))
+    candidate_limit = int(yt.get("candidate_limit", 100)) if scope == "search" else None
+    index = {
+        "schema_version": "webactueel-youtube-collection/1.1",
+        "scope": scope,
+        "query": yt.get("query"),
+        "collection_status": "access_blocked",
+        "language_priority": ["en", "nl", "other"],
+        "candidate_count": 0,
+        "eligible_count": 0,
+        "selected_count": 0,
+        "item_count": 0,
+        "transcript_count": 0,
+        "no_caption_count": 0,
+        "caption_error_count": 0,
+        "comment_error_count": 0,
+        "sort_by": yt.get("sort_by", "relevance"),
+        "year_from": yt.get("year_from"),
+        "year_to": yt.get("year_to"),
+        "include_comments": bool(yt.get("include_comments")),
+        "comment_identity_minimized": True,
+        "discovery": {
+            "scan_limit": scan_limit,
+            "candidate_limit": candidate_limit,
+            "possibly_truncated": False,
+            "access_blocked": True,
+            "sources": [],
+        },
+        "ranking_scope_note": "No ranking was produced because public accountless YouTube access was blocked by the upstream service.",
+        "comments_scope_note": None,
+        "discovery_errors": [{
+            "stage": "access",
+            "kind": "access_blocked",
+            "error": str(error)[:1000],
+        }],
+        "items": [],
+    }
+    content = "# YouTube collection\n\nCollection status: access_blocked\n"
+    (results_dir / "youtube-index.json").write_text(json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if req.get("analysis_content_allowed") or req.get("reuse_allowed"):
+        (results_dir / "content.md").write_text(content, encoding="utf-8")
+    return content, index
+
+
+def normalize_youtube_access_status(index, results_dir=None):
+    errors = index.get("discovery_errors") or []
+    if any(is_youtube_access_blocked_error(error.get("error")) for error in errors if isinstance(error, dict)):
+        index["collection_status"] = "access_blocked"
+        discovery = index.setdefault("discovery", {})
+        discovery["access_blocked"] = True
+        results_dir = Path(results_dir or RESULTS)
+        (results_dir / "youtube-index.json").write_text(json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return index
 
 
 def media_content(req, media_meta=None):
@@ -297,15 +374,25 @@ def main():
     started = datetime.now(timezone.utc).isoformat()
 
     if req["mode"] == "youtube":
-        content, index = youtube_runtime.collect(req, RESULTS)
+        try:
+            content, index = youtube_runtime.collect(req, RESULTS)
+            index = normalize_youtube_access_status(index, RESULTS)
+        except RuntimeError as exc:
+            if not is_youtube_access_blocked_error(exc):
+                raise
+            content, index = blocked_youtube_collection(req, exc, RESULTS)
         normalized = content.strip() + "\n"
         metadata = {
             "youtube": {
                 "scope": index["scope"],
                 "query": index.get("query"),
+                "collection_status": index["collection_status"],
                 "candidate_count": index["candidate_count"],
                 "eligible_count": index["eligible_count"],
+                "selected_count": index["selected_count"],
                 "item_count": index["item_count"],
+                "transcript_count": index["transcript_count"],
+                "discovery_possibly_truncated": bool(index.get("discovery", {}).get("possibly_truncated")),
                 "sort_by": index["sort_by"],
                 "year_from": index.get("year_from"),
                 "year_to": index.get("year_to"),
@@ -316,14 +403,40 @@ def main():
         }
         result = common_result(
             req, started, normalized, "youtube", metadata,
-            ["yt-dlp:youtube-discovery", "yt-dlp:metadata-only", "yt-dlp:single-selected-caption", "normalize:subtitle-lines", "optional:public-comments"]
+            ["yt-dlp:youtube-discovery", "yt-dlp:metadata-only", "yt-dlp:single-selected-caption", "normalize:subtitle-cues", "optional:public-comments"]
         )
     else:
-        content, detected_mode, metadata, transformations = extract(req)
-        normalized = content.strip() + "\n"
-        result = common_result(req, started, normalized, detected_mode, metadata, transformations)
-        if result["content_persisted"]:
-            (RESULTS / "content.md").write_text(normalized, encoding="utf-8")
+        try:
+            content, detected_mode, metadata, transformations = extract(req)
+            normalized = content.strip() + "\n"
+            result = common_result(req, started, normalized, detected_mode, metadata, transformations)
+            if result["content_persisted"]:
+                (RESULTS / "content.md").write_text(normalized, encoding="utf-8")
+        except RuntimeError as exc:
+            if not (req.get("url") and youtube_runtime.is_youtube_url(req["url"]) and is_youtube_access_blocked_error(exc)):
+                raise
+            content, index = blocked_youtube_collection(req, exc, RESULTS)
+            normalized = content.strip() + "\n"
+            metadata = {
+                "youtube": {
+                    "scope": index["scope"],
+                    "query": index.get("query"),
+                    "collection_status": "access_blocked",
+                    "candidate_count": 0,
+                    "eligible_count": 0,
+                    "selected_count": 0,
+                    "item_count": 0,
+                    "transcript_count": 0,
+                    "discovery_possibly_truncated": False,
+                    "sort_by": index["sort_by"],
+                    "year_from": index.get("year_from"),
+                    "year_to": index.get("year_to"),
+                    "include_comments": index["include_comments"],
+                    "index_file": "youtube-index.json",
+                    "media_downloaded": False,
+                }
+            }
+            result = common_result(req, started, normalized, "youtube", metadata, ["yt-dlp:access-blocked-safe-stop"])
 
     (RESULTS / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (RESULTS / "tool-versions.txt").write_text("\n".join(f"{key}={value}" for key, value in result["tool_versions"].items()) + "\n", encoding="utf-8")

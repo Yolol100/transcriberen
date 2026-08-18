@@ -90,8 +90,7 @@ class RequestContractTests(unittest.TestCase):
         request = copy.deepcopy(BASE)
         request.pop("analysis_content_allowed", None)
         request.update({
-            "mode": "youtube",
-            "url": "",
+            "mode": "youtube", "url": "",
             "youtube": {"scope": "search", "query": "wordpress performance", "year_from": 2025, "year_to": 2026}
         })
         validated = resolve_request.validate_request(request)
@@ -110,26 +109,33 @@ class RequestContractTests(unittest.TestCase):
     def test_youtube_disallows_audio_fallback(self, _dns):
         request = copy.deepcopy(BASE)
         request.update({
-            "mode": "youtube",
-            "url": "https://www.youtube.com/watch?v=abc",
-            "youtube": {"scope": "video"},
-            "allow_audio_fallback": True,
-            "audio_access_authorized": True,
-            "rights_basis": "authorized"
+            "mode": "youtube", "url": "https://www.youtube.com/watch?v=abc",
+            "youtube": {"scope": "video"}, "allow_audio_fallback": True,
+            "audio_access_authorized": True, "rights_basis": "authorized"
         })
         with self.assertRaisesRegex(ValueError, "audio fallback is forbidden"):
             resolve_request.validate_request(request)
 
-    def test_youtube_comment_all_is_supported(self):
+    def test_youtube_comment_all_requires_explicit_unbounded_opt_in(self):
         request = copy.deepcopy(BASE)
         request.update({
-            "mode": "youtube",
-            "url": "https://www.youtube.com/watch?v=abc",
+            "mode": "youtube", "url": "https://www.youtube.com/watch?v=abc",
             "youtube": {"scope": "video", "include_comments": True, "max_comments": "all"}
+        })
+        with patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS):
+            with self.assertRaisesRegex(ValueError, "allow_unbounded"):
+                resolve_request.validate_request(request)
+
+    def test_youtube_comment_all_is_supported_with_explicit_unbounded_opt_in(self):
+        request = copy.deepcopy(BASE)
+        request.update({
+            "mode": "youtube", "url": "https://www.youtube.com/watch?v=abc",
+            "youtube": {"scope": "video", "include_comments": True, "max_comments": "all", "allow_unbounded": True}
         })
         with patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS):
             validated = resolve_request.validate_request(request)
         self.assertEqual(validated["youtube"]["max_comments"], "all")
+        self.assertTrue(validated["youtube"]["allow_unbounded"])
 
 
 if __name__ == "__main__":

@@ -66,6 +66,9 @@ jobs:
           assert 'actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131' in workflow
           assert 'youtube_scope' in workflow
           assert 'youtube_include_comments' in workflow
+          assert 'sudo apt-get install -y --no-install-recommends ffmpeg' in workflow
+          assert 'ffmpeg -version | head -n 1' in workflow
+          assert 'ffprobe -version | head -n 1' in workflow
           assert 'actions/setup-node' not in workflow
 
           youtube_runtime = pathlib.Path('scripts/youtube_runtime.py').read_text(encoding='utf-8')
@@ -87,10 +90,10 @@ jobs:
 
       - name: Verify pinned yt-dlp binary and local Deno route
         run: |
+          set -o pipefail
           bash scripts/install_tools.sh false
           tools/bin/yt-dlp --version | grep -Fx '2026.07.04'
           tools/bin/deno --version | head -n 1 | grep -F 'deno 2.9.5'
-          ffmpeg -version | head -n 1
 
       - name: Verify Trafilatura runtime
         run: python -c "import trafilatura; print(getattr(trafilatura, '__version__', 'unknown'))"

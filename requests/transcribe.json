@@ -12,6 +12,8 @@
     "sort_by": "relevance",
     "max_items": 20,
     "candidate_limit": 100,
+    "scan_limit": 500,
+    "allow_unbounded": false,
     "year_from": null,
     "year_to": null,
     "min_views": null,
