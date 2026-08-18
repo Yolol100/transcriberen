@@ -105,6 +105,14 @@ jobs:
           assert '--only-binary=:all:' in python_deps
           assert 'requirements.lock' in python_deps
 
+          runtime = pathlib.Path('scripts/runtime.py').read_text(encoding='utf-8')
+          assert 'DEFAULT_COMMAND_TIMEOUT_SECONDS' in runtime
+          assert 'youtube_runtime.run = youtube_run' in runtime
+          assert 'MAX_AUTHORIZED_AUDIO_DURATION_SECONDS' in runtime
+          assert '"--max-filesize", "256M"' in runtime
+          assert 'XML DTD/entity declarations are forbidden' in runtime
+          assert 'sha256_file(audio)' in runtime and 'sha256_file(MODEL)' in runtime
+
           dependency_audit = pathlib.Path('.github/workflows/dependency-review.yml').read_text(encoding='utf-8')
           assert 'pypa/gh-action-pip-audit@1220774d901786e6f652ae159f7b6bc8fea6d266' in dependency_audit
           assert 'inputs: requirements.lock' in dependency_audit

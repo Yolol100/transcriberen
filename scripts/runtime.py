@@ -23,6 +23,15 @@ ROOT = Path(os.environ.get("GITHUB_WORKSPACE", Path.cwd()))
 BIN = ROOT / "tools" / "bin"
 MODEL = ROOT / "tools" / "models" / "ggml-base.bin"
 RESULTS = ROOT / "results"
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 180
+YOUTUBE_COMMAND_TIMEOUT_SECONDS = 300
+YOUTUBE_COMMENT_TIMEOUT_SECONDS = 900
+MEDIA_METADATA_TIMEOUT_SECONDS = 90
+SUBTITLE_TIMEOUT_SECONDS = 180
+AUDIO_DOWNLOAD_TIMEOUT_SECONDS = 900
+WHISPER_TIMEOUT_SECONDS = 5400
+MAX_AUTHORIZED_AUDIO_DURATION_SECONDS = 7200
+MAX_AUTHORIZED_WAV_BYTES = 320 * 1024 * 1024
 
 
 def sha256_bytes(data):
@@ -31,6 +40,14 @@ def sha256_bytes(data):
 
 def sha256_text(text):
     return sha256_bytes(text.encode("utf-8"))
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def validate_public_url(raw):
@@ -43,6 +60,8 @@ def validate_public_url(raw):
         if SECRET_KEY_RE.search(key):
             raise ValueError(f"secret-like query parameter forbidden: {key}")
     infos = socket.getaddrinfo(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80), type=socket.SOCK_STREAM)
+    if not infos:
+        raise ValueError("hostname did not resolve")
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
         if any((ip.is_private, ip.is_loopback, ip.is_link_local, ip.is_multicast, ip.is_reserved, ip.is_unspecified)):
@@ -68,20 +87,55 @@ def fetch_public(url, max_bytes=10_000_000):
         return data, response.geturl(), response.headers.get("content-type", "")
 
 
-def run(command, *, cwd=None, check=True):
-    completed = subprocess.run(command, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+def _timeout_output(value):
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def run(command, *, cwd=None, check=True, timeout=DEFAULT_COMMAND_TIMEOUT_SECONDS):
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = _timeout_output(exc.stdout)
+        stderr = _timeout_output(exc.stderr)
+        detail = f"command timed out after {timeout}s"
+        if check:
+            raise RuntimeError(f"{detail}: {' '.join(map(str, command[:3]))}: {stderr[-2000:]}") from exc
+        return subprocess.CompletedProcess(command, 124, stdout, (stderr + "\n" + detail).strip())
     if check and completed.returncode != 0:
         stderr = completed.stderr[-4000:]
         raise RuntimeError(f"command failed ({completed.returncode}): {' '.join(map(str, command[:3]))}: {stderr}")
     return completed
 
 
+def youtube_run(command, *, check=True):
+    timeout = YOUTUBE_COMMENT_TIMEOUT_SECONDS if "--write-comments" in command else YOUTUBE_COMMAND_TIMEOUT_SECONDS
+    return run(command, check=check, timeout=timeout)
+
+
+# youtube_runtime resolves its module-level run() dynamically, so production
+# YouTube discovery/caption/comment commands inherit the same bounded process
+# runner without changing their accountless/media-free command contract.
+youtube_runtime.run = youtube_run
+
+
 def tool_versions():
     return {
         "trafilatura": getattr(trafilatura, "__version__", "2.1.0"),
-        "yt-dlp": run([str(BIN / "yt-dlp"), "--version"]).stdout.strip(),
-        "ffmpeg": run(["ffmpeg", "-version"]).stdout.splitlines()[0].strip(),
-        "ffprobe": run(["ffprobe", "-version"]).stdout.splitlines()[0].strip(),
+        "yt-dlp": run([str(BIN / "yt-dlp"), "--version"], timeout=30).stdout.strip(),
+        "ffmpeg": run(["ffmpeg", "-version"], timeout=30).stdout.splitlines()[0].strip(),
+        "ffprobe": run(["ffprobe", "-version"], timeout=30).stdout.splitlines()[0].strip(),
         "whisper.cpp": "v1.9.2" if (BIN / "whisper-cli").exists() else "not-installed",
         "whisper_model": "base@5359861c739e955e79d9a303bcbc70fb988958b1" if MODEL.exists() else "not-installed"
     }
@@ -113,7 +167,7 @@ def yt_base():
 
 def detect_media(url):
     cmd = yt_base() + ["--simulate", "--dump-single-json", url]
-    completed = run(cmd, check=False)
+    completed = run(cmd, check=False, timeout=MEDIA_METADATA_TIMEOUT_SECONDS)
     if completed.returncode != 0 or not completed.stdout.strip():
         if youtube_runtime.is_youtube_url(url) and is_youtube_access_blocked_error(completed.stderr):
             raise RuntimeError("youtube_access_blocked: " + completed.stderr[-2000:])
@@ -227,7 +281,7 @@ def media_content(req, media_meta=None):
             "--sub-format", "srt/vtt/best", "--skip-download",
             "-o", str(tmp / "source.%(ext)s"), req["url"]
         ]
-        subtitle_run = run(subtitle_cmd, check=False)
+        subtitle_run = run(subtitle_cmd, check=False, timeout=SUBTITLE_TIMEOUT_SECONDS)
         subtitle_files = sorted([*tmp.glob("source*.srt"), *tmp.glob("source*.vtt")])
         for subtitle_file in subtitle_files:
             text = normalize_subtitles(subtitle_file)
@@ -242,36 +296,48 @@ def media_content(req, media_meta=None):
             raise RuntimeError("no usable public subtitles found and allow_audio_fallback=false")
         if not req.get("audio_access_authorized"):
             raise RuntimeError("audio fallback requires explicit audio_access_authorized=true")
+        duration = (media_meta or {}).get("duration")
+        if not isinstance(duration, (int, float)) or duration <= 0:
+            raise RuntimeError("authorized audio fallback requires positive media duration metadata")
+        if duration > MAX_AUTHORIZED_AUDIO_DURATION_SECONDS:
+            raise RuntimeError(f"authorized audio duration exceeds {MAX_AUTHORIZED_AUDIO_DURATION_SECONDS}s safety limit")
         if not (BIN / "whisper-cli").exists() or not MODEL.exists():
             raise RuntimeError("whisper.cpp runtime/model not installed")
 
         audio_cmd = yt_base() + [
-            "-f", "bestaudio/best", "-x", "--audio-format", "wav",
+            "-f", "bestaudio/best", "--max-filesize", "256M", "-x", "--audio-format", "wav",
             "--postprocessor-args", "ffmpeg:-ar 16000 -ac 1",
             "-o", str(tmp / "audio.%(ext)s"), req["url"]
         ]
-        run(audio_cmd)
+        run(audio_cmd, timeout=AUDIO_DOWNLOAD_TIMEOUT_SECONDS)
         audio_files = sorted(tmp.glob("audio*.wav"))
         if not audio_files:
             raise RuntimeError("yt-dlp/ffmpeg produced no WAV")
         audio = audio_files[0]
+        if audio.stat().st_size > MAX_AUTHORIZED_WAV_BYTES:
+            raise RuntimeError(f"normalized WAV exceeds {MAX_AUTHORIZED_WAV_BYTES} byte safety limit")
         prefix = tmp / "whisper"
         whisper_cmd = [str(BIN / "whisper-cli"), "-m", str(MODEL), "-f", str(audio), "-l", language, "-otxt", "-of", str(prefix)]
-        completed = run(whisper_cmd)
+        completed = run(whisper_cmd, timeout=WHISPER_TIMEOUT_SECONDS)
         transcript_path = Path(f"{prefix}.txt")
         text = transcript_path.read_text(encoding="utf-8", errors="replace").strip() if transcript_path.exists() else completed.stdout.strip()
         if not text:
             raise RuntimeError("whisper.cpp produced empty transcript")
         return text, "whisper", {
             "media": media_meta,
-            "audio_sha256": sha256_bytes(audio.read_bytes()),
+            "audio_sha256": sha256_file(audio),
             "audio_bytes": audio.stat().st_size,
-            "model_sha256": sha256_bytes(MODEL.read_bytes()),
-            "audio_access_authorized": True
+            "model_sha256": sha256_file(MODEL),
+            "audio_access_authorized": True,
+            "audio_duration_limit_seconds": MAX_AUTHORIZED_AUDIO_DURATION_SECONDS,
+            "audio_wav_limit_bytes": MAX_AUTHORIZED_WAV_BYTES
         }, ["yt-dlp:authorized-audio", "ffmpeg:16khz-mono-wav", "whisper.cpp:base"]
 
 
 def parse_xml_links(data, base_url, mode):
+    upper = data.upper()
+    if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+        raise ValueError("XML DTD/entity declarations are forbidden")
     root = ET.fromstring(data)
     links = []
     if mode == "sitemap" or root.tag.lower().endswith("sitemapindex") or root.tag.lower().endswith("urlset"):

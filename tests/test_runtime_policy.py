@@ -1,10 +1,12 @@
 import importlib.util
 import json
 import pathlib
+import subprocess
 import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 
 # Runtime imports Trafilatura in CI after requirements installation. Provide a
 # minimal local stub so the policy tests remain dependency-light as well.
@@ -67,6 +69,52 @@ class RuntimePolicyTests(unittest.TestCase):
             self.assertTrue((pathlib.Path(tmp) / "youtube-index.json").is_file())
             self.assertEqual((pathlib.Path(tmp) / "content.md").read_text(), content)
             self.assertEqual(json.loads((pathlib.Path(tmp) / "youtube-index.json").read_text())["selected_count"], 0)
+
+    def test_runtime_subprocess_timeout_is_fail_closed(self):
+        expired = subprocess.TimeoutExpired(["tool"], 1, output=b"partial", stderr=b"stuck")
+        with mock.patch.object(runtime.subprocess, "run", side_effect=expired):
+            with self.assertRaisesRegex(RuntimeError, "timed out after 1s"):
+                runtime.run(["tool"], timeout=1)
+
+    def test_runtime_subprocess_timeout_returns_124_when_check_false(self):
+        expired = subprocess.TimeoutExpired(["tool"], 1, output=b"partial", stderr=b"stuck")
+        with mock.patch.object(runtime.subprocess, "run", side_effect=expired):
+            completed = runtime.run(["tool"], timeout=1, check=False)
+        self.assertEqual(completed.returncode, 124)
+        self.assertIn("timed out after 1s", completed.stderr)
+
+    def test_youtube_commands_use_bounded_process_adapter(self):
+        sentinel = subprocess.CompletedProcess(["yt-dlp"], 0, "", "")
+        with mock.patch.object(runtime, "run", return_value=sentinel) as bounded:
+            result = runtime.youtube_runtime.run(["yt-dlp", "--write-comments"], check=False)
+        self.assertIs(result, sentinel)
+        bounded.assert_called_once_with(
+            ["yt-dlp", "--write-comments"],
+            check=False,
+            timeout=runtime.YOUTUBE_COMMENT_TIMEOUT_SECONDS,
+        )
+
+    def test_xml_dtd_and_entity_declarations_are_rejected(self):
+        payload = b'<!DOCTYPE rss [<!ENTITY x "boom">]><rss><channel><link>&x;</link></channel></rss>'
+        with self.assertRaisesRegex(ValueError, "DTD/entity"):
+            runtime.parse_xml_links(payload, "https://example.com/feed.xml", "feed")
+
+    def test_authorized_audio_duration_is_bounded_before_download(self):
+        req = {
+            "url": "https://media.example.com/audio.mp3",
+            "language": "auto",
+            "allow_audio_fallback": True,
+            "audio_access_authorized": True,
+        }
+        meta = {
+            "extractor": "Generic",
+            "duration": runtime.MAX_AUTHORIZED_AUDIO_DURATION_SECONDS + 1,
+            "webpage_url": req["url"],
+        }
+        completed = subprocess.CompletedProcess(["yt-dlp"], 0, "", "")
+        with mock.patch.object(runtime, "run", return_value=completed):
+            with self.assertRaisesRegex(RuntimeError, "audio duration exceeds"):
+                runtime.media_content(req, meta)
 
 
 if __name__ == "__main__":
