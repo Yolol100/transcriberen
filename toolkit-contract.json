@@ -1,39 +1,80 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "owner_skill": "webactueel-workflow",
   "owner_mode": "transcribeer",
   "project_id": "project-transcriberen",
   "repository": "Yolol100/transcriberen",
-  "evidence_role": "controlled_runtime_public_source_acquisition_and_transcription",
+  "evidence_role": "controlled_runtime_public_source_discovery_caption_comment_acquisition_and_transcription",
   "requires_account": false,
   "requires_api_key": false,
   "requires_mcp": false,
   "tools": [
-    {"id":"yt-dlp","version":"2026.07.04","sha256":"495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd","trigger_when":"public media metadata/subtitles or authorized non-YouTube media extraction is needed","outputs":["normalized subtitles, metadata or temporary authorized audio"]},
-    {"id":"deno-ejs-runtime","version":"2.9.5","sha256":"8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530","trigger_when":"yt-dlp requires local EJS challenge execution","outputs":["local restricted-permission JavaScript challenge execution"]},
-    {"id":"ffmpeg","version":"runner-recorded","trigger_when":"explicitly authorized non-YouTube audio normalization is needed","outputs":["temporary 16 kHz mono WAV and media metadata"]},
-    {"id":"whisper.cpp","version":"v1.9.2","sha256":"46811a3ecf584307480a220b9ef5ff81b7b22dc41577cbc274ce3afc61f753b1","trigger_when":"authorized non-YouTube audio has no usable subtitles and both audio fallback gates are true","outputs":["local transcript"]},
-    {"id":"whisper-base-model","version":"hf-5359861c739e955e79d9a303bcbc70fb988958b1","sha256":"60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe","trigger_when":"authorized whisper.cpp audio fallback is enabled","outputs":["local model runtime only"]},
-    {"id":"trafilatura","version":"2.1.0","trigger_when":"article/html extraction is needed","outputs":["normalized article text"]},
-    {"id":"python-source-parser","version":"repo","trigger_when":"RSS/Atom/sitemap parsing or provenance validation is needed","outputs":["normalized discovered links and provenance"]}
+    {
+      "id": "yt-dlp",
+      "version": "2026.07.04",
+      "sha256": "495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd",
+      "trigger_when": "public YouTube search/channel/playlist/video/Short metadata, captions or comments; public media metadata/subtitles; or authorized non-YouTube extraction",
+      "outputs": ["YouTube discovery candidates", "selected captions", "public comments", "normalized metadata", "temporary authorized non-YouTube audio"]
+    },
+    {
+      "id": "deno-ejs-runtime",
+      "version": "2.9.5",
+      "sha256": "8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530",
+      "trigger_when": "yt-dlp requires local EJS challenge execution",
+      "outputs": ["local restricted-permission JavaScript challenge execution"]
+    },
+    {
+      "id": "ffmpeg",
+      "version": "runner-recorded",
+      "trigger_when": "explicitly authorized non-YouTube audio normalization is needed",
+      "outputs": ["temporary 16 kHz mono WAV and media metadata"]
+    },
+    {
+      "id": "whisper.cpp",
+      "version": "v1.9.2",
+      "sha256": "46811a3ecf584307480a220b9ef5ff81b7b22dc41577cbc274ce3afc61f753b1",
+      "trigger_when": "authorized non-YouTube audio has no usable subtitles and both audio fallback gates are true",
+      "outputs": ["local transcript"]
+    },
+    {
+      "id": "whisper-base-model",
+      "version": "hf-5359861c739e955e79d9a303bcbc70fb988958b1",
+      "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+      "trigger_when": "authorized whisper.cpp audio fallback is enabled",
+      "outputs": ["local model runtime only"]
+    },
+    {
+      "id": "trafilatura",
+      "version": "2.1.0",
+      "trigger_when": "article/html extraction is needed",
+      "outputs": ["normalized article text"]
+    },
+    {
+      "id": "python-source-parser",
+      "version": "repo",
+      "trigger_when": "RSS/Atom/sitemap parsing, YouTube result normalization/ranking or provenance validation is needed",
+      "outputs": ["normalized discovered links", "YouTube selection/index", "provenance"]
+    }
   ],
   "usage_assertions": [
-    {"tool":"yt-dlp","path":"scripts/install_tools.sh","contains":"YT_DLP_SHA256"},
-    {"tool":"deno-ejs-runtime","path":"scripts/install_tools.sh","contains":"DENO_SHA256"},
-    {"tool":"ffmpeg","path":"scripts/runtime.py","contains":"ffmpeg"},
-    {"tool":"whisper.cpp","path":"scripts/install_tools.sh","contains":"WHISPER_SHA256"},
-    {"tool":"whisper-base-model","path":"scripts/install_tools.sh","contains":"WHISPER_MODEL_SHA256"},
-    {"tool":"trafilatura","path":"requirements.txt","contains":"trafilatura==2.1.0"},
-    {"tool":"python-source-parser","path":"scripts/runtime.py","contains":"xml.etree.ElementTree"}
+    {"tool": "yt-dlp", "path": "scripts/install_tools.sh", "contains": "YT_DLP_SHA256"},
+    {"tool": "deno-ejs-runtime", "path": "scripts/install_tools.sh", "contains": "DENO_SHA256"},
+    {"tool": "ffmpeg", "path": "scripts/runtime.py", "contains": "ffmpeg"},
+    {"tool": "whisper.cpp", "path": "scripts/install_tools.sh", "contains": "WHISPER_SHA256"},
+    {"tool": "whisper-base-model", "path": "scripts/install_tools.sh", "contains": "WHISPER_MODEL_SHA256"},
+    {"tool": "trafilatura", "path": "requirements.txt", "contains": "trafilatura==2.1.0"},
+    {"tool": "python-source-parser", "path": "scripts/youtube_runtime.py", "contains": "rank_metadata"}
   ],
   "boundaries": [
-    "Only public HTTP(S) sources; no login, cookie, credential, DRM, paywall, CAPTCHA or age-control bypass.",
-    "Public YouTube is captions-and-metadata only; audio/video download and Whisper fallback are blocked even when audio fallback is otherwise requested.",
+    "Only public HTTP(S) sources and accountless public YouTube discovery; no login, cookie, credential, DRM, paywall, CAPTCHA or age-control bypass.",
+    "Public YouTube is captions, metadata and optional public comments only; audio/video download and Whisper fallback are blocked.",
+    "Automatic YouTube caption choice is English, then Dutch, then the first other available language; manual captions beat automatic captions within the same language.",
+    "Auto-translated YouTube caption variants are excluded during selection using the supported yt-dlp translated_subs skip argument.",
+    "YouTube search rankings are relative to the fetched candidate set and must not be presented as a global ranking of all YouTube.",
+    "Public comments may contain personal data; they are task-scoped analysis evidence and never automatic project truth.",
+    "analysis_content_allowed permits short-lived analysis/paraphrase artifacts only and does not imply reuse rights.",
     "Non-YouTube Whisper fallback requires allow_audio_fallback=true, audio_access_authorized=true and a concrete authorization/rights_basis.",
-    "The official yt-dlp Unix binary bundles EJS scripts; pinned local Deno is used for the JavaScript runtime and remote EJS component downloads are not enabled.",
-    "Raw source content is never automatically project truth.",
-    "Content is only persisted in artifacts when reuse_allowed=true; otherwise only provenance, metadata and hashes persist.",
-    "Audio media and model files are temporary runtime inputs and are never committed to Git.",
-    "All output is at most controlled_runtime evidence and remains subject to Webactueel-workflow source quality, rights, deduplication and currentness gates."
+    "Raw source content is never automatically project truth; webactueel-workflow owns quality, currentness, deduplication and knowledge promotion.",
+    "All output is at most controlled_runtime evidence."
   ]
 }

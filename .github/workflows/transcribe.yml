@@ -8,39 +8,106 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'Publieke HTTP(S)-bron'
-        required: true
+        description: 'Publieke HTTP(S)-bron; leeg toegestaan bij YouTube search'
+        required: false
         type: string
       mode:
-        description: 'auto, media, article, feed of sitemap'
+        description: 'auto, media, article, feed, sitemap of youtube'
+        required: true
+        default: youtube
+        type: choice
+        options: [auto, media, article, feed, sitemap, youtube]
+      language:
+        description: 'Taalcode of auto; auto = Engels, Nederlands, daarna eerste overige track'
         required: true
         default: auto
-        type: choice
-        options: [auto, media, article, feed, sitemap]
-      language:
-        description: 'Taalcode of auto'
+        type: string
+      youtube_scope:
+        description: 'video, short, search, playlist, channel_videos, channel_shorts of channel_all'
         required: true
-        default: nl
+        default: video
+        type: choice
+        options: [video, short, search, playlist, channel_videos, channel_shorts, channel_all]
+      youtube_query:
+        description: 'Zoekterm voor youtube_scope=search'
+        required: false
+        type: string
+      youtube_sort_by:
+        description: 'Rangschik binnen opgehaalde kandidaatset'
+        required: true
+        default: relevance
+        type: choice
+        options: [relevance, views, likes, comments, newest]
+      youtube_max_items:
+        description: 'Max geselecteerde videos; 0 = alle ontdekte items'
+        required: true
+        default: '20'
+        type: string
+      youtube_candidate_limit:
+        description: 'Search-kandidaatset (1..500) voor lokale filtering/ranking'
+        required: true
+        default: '100'
+        type: string
+      youtube_year_from:
+        description: 'Optioneel eerste uploadjaar, bv. 2025'
+        required: false
+        type: string
+      youtube_year_to:
+        description: 'Optioneel laatste uploadjaar, bv. 2026'
+        required: false
+        type: string
+      youtube_min_views:
+        description: 'Optioneel minimum aantal views'
+        required: false
+        type: string
+      youtube_min_likes:
+        description: 'Optioneel minimum aantal likes'
+        required: false
+        type: string
+      youtube_min_comments:
+        description: 'Optioneel minimum aantal comments'
+        required: false
+        type: string
+      youtube_include_comments:
+        description: 'Haal publieke comments op zonder media te downloaden'
+        required: true
+        default: false
+        type: boolean
+      youtube_comment_sort:
+        description: 'YouTube commentsortering'
+        required: true
+        default: top
+        type: choice
+        options: [top, new]
+      youtube_max_comments:
+        description: 'Comments per video; integer of all'
+        required: true
+        default: '200'
         type: string
       allow_audio_fallback:
-        description: 'Gebruik lokale whisper.cpp alleen voor expliciet geautoriseerde niet-YouTube-audio'
+        description: 'Alleen voor expliciet geautoriseerde niet-YouTube-audio'
         required: true
         default: false
         type: boolean
       audio_access_authorized:
-        description: 'Bevestig dat de audio rechtmatig is aangeleverd/toegankelijk en transcriptie is geautoriseerd'
+        description: 'Bevestig rechtmatige audio-toegang/transcriptie voor niet-YouTube fallback'
         required: true
         default: false
         type: boolean
+      analysis_content_allowed:
+        description: 'Bewaar kortstondige transcript/comment-artifacts voor analyse/parafrase'
+        required: true
+        default: true
+        type: boolean
       reuse_allowed:
-        description: 'Persist genormaliseerde inhoud alleen als hergebruik aantoonbaar is toegestaan'
+        description: 'Sta inhoudelijk hergebruik buiten analyse toe; vereist concrete rechtenbasis'
         required: true
         default: false
         type: boolean
       rights_basis:
-        description: 'Concrete rechtenbasis vereist voor audiofallback of reuse_allowed=true'
+        description: 'Rechten-/gebruiksbasis; analysis-paraphrase-only is geldig voor analyse-artifacts'
         required: true
-        default: analysis-only
+        default: analysis-paraphrase-only
         type: string
       source_set_version:
         description: 'Actuele Project Transcriberen source_set_version'
@@ -59,6 +126,7 @@ jobs:
       request_id: ${{ steps.resolve.outputs.request_id }}
       install_whisper: ${{ steps.resolve.outputs.install_whisper }}
       reuse_allowed: ${{ steps.resolve.outputs.reuse_allowed }}
+      persist_content: ${{ steps.resolve.outputs.persist_content }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -69,8 +137,22 @@ jobs:
           INPUT_URL: ${{ inputs.url }}
           INPUT_MODE: ${{ inputs.mode }}
           INPUT_LANGUAGE: ${{ inputs.language }}
+          INPUT_YOUTUBE_SCOPE: ${{ inputs.youtube_scope }}
+          INPUT_YOUTUBE_QUERY: ${{ inputs.youtube_query }}
+          INPUT_YOUTUBE_SORT_BY: ${{ inputs.youtube_sort_by }}
+          INPUT_YOUTUBE_MAX_ITEMS: ${{ inputs.youtube_max_items }}
+          INPUT_YOUTUBE_CANDIDATE_LIMIT: ${{ inputs.youtube_candidate_limit }}
+          INPUT_YOUTUBE_YEAR_FROM: ${{ inputs.youtube_year_from }}
+          INPUT_YOUTUBE_YEAR_TO: ${{ inputs.youtube_year_to }}
+          INPUT_YOUTUBE_MIN_VIEWS: ${{ inputs.youtube_min_views }}
+          INPUT_YOUTUBE_MIN_LIKES: ${{ inputs.youtube_min_likes }}
+          INPUT_YOUTUBE_MIN_COMMENTS: ${{ inputs.youtube_min_comments }}
+          INPUT_YOUTUBE_INCLUDE_COMMENTS: ${{ inputs.youtube_include_comments }}
+          INPUT_YOUTUBE_COMMENT_SORT: ${{ inputs.youtube_comment_sort }}
+          INPUT_YOUTUBE_MAX_COMMENTS: ${{ inputs.youtube_max_comments }}
           INPUT_ALLOW_AUDIO_FALLBACK: ${{ inputs.allow_audio_fallback }}
           INPUT_AUDIO_ACCESS_AUTHORIZED: ${{ inputs.audio_access_authorized }}
+          INPUT_ANALYSIS_CONTENT_ALLOWED: ${{ inputs.analysis_content_allowed }}
           INPUT_REUSE_ALLOWED: ${{ inputs.reuse_allowed }}
           INPUT_RIGHTS_BASIS: ${{ inputs.rights_basis }}
           INPUT_SOURCE_SET_VERSION: ${{ inputs.source_set_version }}
@@ -88,7 +170,7 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.run == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 330
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -131,9 +213,9 @@ jobs:
           echo '## Transcriberen controlled-runtime' >> "$GITHUB_STEP_SUMMARY"
           echo '' >> "$GITHUB_STEP_SUMMARY"
           echo "Request: ${{ needs.resolve.outputs.request_id }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Content persistence requested: ${{ needs.resolve.outputs.reuse_allowed }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Analysis/reuse artifact persistence: ${{ needs.resolve.outputs.persist_content }}" >> "$GITHUB_STEP_SUMMARY"
           if [ -f results/result.json ]; then
-            python -c 'import json; r=json.load(open("results/result.json", encoding="utf-8")); print("Detected mode: {}\nEvidence level: {}\nContent persisted: {}\nContent SHA-256: {}".format(r.get("detected_mode"), r.get("evidence_level"), r.get("content_persisted"), r.get("content_sha256")))' >> "$GITHUB_STEP_SUMMARY"
+            python -c 'import json; r=json.load(open("results/result.json", encoding="utf-8")); print("Detected mode: {}\nEvidence level: {}\nUsage mode: {}\nContent persisted: {}\nContent SHA-256: {}".format(r.get("detected_mode"), r.get("evidence_level"), r.get("usage_mode"), r.get("content_persisted"), r.get("content_sha256")))' >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Upload normalized result
@@ -142,5 +224,5 @@ jobs:
         with:
           name: transcription-result-${{ needs.resolve.outputs.request_id }}
           path: results/
-          retention-days: 7
+          retention-days: 3
           if-no-files-found: warn

@@ -42,6 +42,7 @@ jobs:
           import pathlib
 
           contract = json.load(open('toolkit-contract.json', encoding='utf-8'))
+          assert contract['schema_version'] == '1.1'
           assert contract['owner_skill'] == 'webactueel-workflow'
           assert contract['owner_mode'] == 'transcribeer'
           assert contract['project_id'] == 'project-transcriberen'
@@ -49,6 +50,7 @@ jobs:
               assert contract.get(key) is False, f'{key} must be false'
           ids = [tool['id'] for tool in contract['tools']]
           assert len(ids) == len(set(ids)), 'duplicate tool ids'
+          assert 'yt-dlp' in ids
           assert 'deno-ejs-runtime' in ids
           assert 'node-ejs-runtime' not in ids
           covered = set()
@@ -59,9 +61,22 @@ jobs:
               assert assertion['contains'] in path.read_text(encoding='utf-8'), f"{assertion['tool']} not wired in {path}"
               covered.add(assertion['tool'])
           assert covered == set(ids), f'unwired tools: {set(ids) - covered}'
+
           workflow = pathlib.Path('.github/workflows/transcribe.yml').read_text(encoding='utf-8')
           assert 'actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131' in workflow
+          assert 'youtube_scope' in workflow
+          assert 'youtube_include_comments' in workflow
           assert 'actions/setup-node' not in workflow
+
+          youtube_runtime = pathlib.Path('scripts/youtube_runtime.py').read_text(encoding='utf-8')
+          assert '"--skip-download"' in youtube_runtime
+          assert 'ytsearch' in youtube_runtime
+          assert 'channel_shorts' in youtube_runtime
+          assert 'comment_sort' in youtube_runtime and 'max_comments' in youtube_runtime
+          assert 'skip=translated_subs' in youtube_runtime
+          assert 'bestaudio' not in youtube_runtime
+          assert '"-x"' not in youtube_runtime
+
           installer = pathlib.Path('scripts/install_tools.sh').read_text(encoding='utf-8')
           assert 'DENO_VERSION="v2.9.5"' in installer
           assert 'DENO_SHA256="8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530"' in installer

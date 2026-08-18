@@ -19,11 +19,12 @@ BASE = {
     "project_id": "project-transcriberen",
     "url": "https://example.com/source",
     "mode": "article",
-    "language": "nl",
+    "language": "auto",
     "allow_audio_fallback": False,
     "audio_access_authorized": False,
+    "analysis_content_allowed": False,
     "reuse_allowed": False,
-    "rights_basis": "analysis-only",
+    "rights_basis": "analysis-paraphrase-only",
     "source_context": {"project_id": "project-transcriberen", "source_set_version": "test-source-set"}
 }
 
@@ -34,7 +35,7 @@ class RequestContractTests(unittest.TestCase):
         request = resolve_request.validate_request(copy.deepcopy(BASE))
         self.assertFalse(request["reuse_allowed"])
         self.assertFalse(request["audio_access_authorized"])
-        self.assertEqual(request["mode"], "article")
+        self.assertEqual(request["language"], "auto")
 
     @patch.object(resolve_request.socket, "getaddrinfo", return_value=PRIVATE_DNS)
     def test_private_target_is_rejected(self, _dns):
@@ -61,26 +62,18 @@ class RequestContractTests(unittest.TestCase):
             resolve_request.validate_request(request)
 
     @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
-    def test_verified_reuse_basis_is_accepted(self, _dns):
+    def test_analysis_artifact_does_not_imply_reuse(self, _dns):
         request = copy.deepcopy(BASE)
-        request["reuse_allowed"] = True
-        request["rights_basis"] = "publisher explicitly permits reuse"
+        request["analysis_content_allowed"] = True
         validated = resolve_request.validate_request(request)
-        self.assertTrue(validated["reuse_allowed"])
+        self.assertTrue(validated["analysis_content_allowed"])
+        self.assertFalse(validated["reuse_allowed"])
 
     @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
     def test_audio_fallback_requires_explicit_authorization(self, _dns):
         request = copy.deepcopy(BASE)
         request["allow_audio_fallback"] = True
         with self.assertRaisesRegex(ValueError, "audio_access_authorized=true"):
-            resolve_request.validate_request(request)
-
-    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
-    def test_audio_fallback_rejects_analysis_only_rights(self, _dns):
-        request = copy.deepcopy(BASE)
-        request["allow_audio_fallback"] = True
-        request["audio_access_authorized"] = True
-        with self.assertRaisesRegex(ValueError, "authorization/rights_basis"):
             resolve_request.validate_request(request)
 
     @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
@@ -92,7 +85,51 @@ class RequestContractTests(unittest.TestCase):
         request["rights_basis"] = "client supplied media and authorized transcription"
         validated = resolve_request.validate_request(request)
         self.assertTrue(validated["allow_audio_fallback"])
-        self.assertTrue(validated["audio_access_authorized"])
+
+    def test_youtube_search_needs_no_url(self):
+        request = copy.deepcopy(BASE)
+        request.pop("analysis_content_allowed", None)
+        request.update({
+            "mode": "youtube",
+            "url": "",
+            "youtube": {"scope": "search", "query": "wordpress performance", "year_from": 2025, "year_to": 2026}
+        })
+        validated = resolve_request.validate_request(request)
+        self.assertIsNone(validated["url"])
+        self.assertEqual(validated["youtube"]["query"], "wordpress performance")
+        self.assertTrue(validated["analysis_content_allowed"])
+
+    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
+    def test_youtube_channel_scope_requires_youtube_host(self, _dns):
+        request = copy.deepcopy(BASE)
+        request.update({"mode": "youtube", "youtube": {"scope": "channel_all"}})
+        with self.assertRaisesRegex(ValueError, "YouTube scope requires"):
+            resolve_request.validate_request(request)
+
+    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
+    def test_youtube_disallows_audio_fallback(self, _dns):
+        request = copy.deepcopy(BASE)
+        request.update({
+            "mode": "youtube",
+            "url": "https://www.youtube.com/watch?v=abc",
+            "youtube": {"scope": "video"},
+            "allow_audio_fallback": True,
+            "audio_access_authorized": True,
+            "rights_basis": "authorized"
+        })
+        with self.assertRaisesRegex(ValueError, "audio fallback is forbidden"):
+            resolve_request.validate_request(request)
+
+    def test_youtube_comment_all_is_supported(self):
+        request = copy.deepcopy(BASE)
+        request.update({
+            "mode": "youtube",
+            "url": "https://www.youtube.com/watch?v=abc",
+            "youtube": {"scope": "video", "include_comments": True, "max_comments": "all"}
+        })
+        with patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS):
+            validated = resolve_request.validate_request(request)
+        self.assertEqual(validated["youtube"]["max_comments"], "all")
 
 
 if __name__ == "__main__":

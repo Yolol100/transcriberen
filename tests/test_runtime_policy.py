@@ -1,8 +1,20 @@
 import importlib.util
 import pathlib
+import sys
+import types
 import unittest
 
-MODULE_PATH = pathlib.Path(__file__).parents[1] / "scripts" / "runtime.py"
+# Runtime imports Trafilatura in CI after requirements installation. Provide a
+# minimal local stub so the policy tests remain dependency-light as well.
+if "trafilatura" not in sys.modules:
+    stub = types.ModuleType("trafilatura")
+    stub.__version__ = "test"
+    stub.extract = lambda *args, **kwargs: ""
+    sys.modules["trafilatura"] = stub
+
+scripts_dir = pathlib.Path(__file__).parents[1] / "scripts"
+sys.path.insert(0, str(scripts_dir))
+MODULE_PATH = scripts_dir / "runtime.py"
 spec = importlib.util.spec_from_file_location("transcribe_runtime", MODULE_PATH)
 runtime = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runtime)
@@ -18,6 +30,9 @@ class RuntimePolicyTests(unittest.TestCase):
 
     def test_non_youtube_media_is_not_classified_as_youtube(self):
         self.assertFalse(runtime.is_public_youtube("https://media.example.com/audio.mp3", {"extractor": "Generic"}))
+
+    def test_generic_single_media_base_stays_no_playlist(self):
+        self.assertIn("--no-playlist", runtime.yt_base())
 
 
 if __name__ == "__main__":

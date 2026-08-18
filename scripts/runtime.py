@@ -14,10 +14,11 @@ from urllib.parse import parse_qsl, urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 import trafilatura
+import youtube_runtime
 
 SECRET_KEY_RE = re.compile(r"(?:token|secret|api[_-]?key|access[_-]?key|password|passwd|authorization|signature|sig|credential)", re.I)
 TIMING_RE = re.compile(r"\d{1,2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{1,2}:\d{2}:\d{2}[,.]\d{3}")
-USER_AGENT = "Webactueel-Transcriberen/1.0 (+controlled public-source runtime)"
+USER_AGENT = "Webactueel-Transcriberen/1.1 (+controlled public-source runtime)"
 ROOT = Path(os.environ.get("GITHUB_WORKSPACE", Path.cwd()))
 BIN = ROOT / "tools" / "bin"
 MODEL = ROOT / "tools" / "models" / "ggml-base.bin"
@@ -103,6 +104,8 @@ def normalize_subtitles(path):
 
 
 def yt_base():
+    # This base is intentionally single-item only. Playlist/channel/search
+    # discovery is isolated in youtube_runtime and never inherits --no-playlist.
     return [str(BIN / "yt-dlp"), "--no-config", "--no-cookies", "--no-netrc", "--no-playlist", "--no-warnings"]
 
 
@@ -130,14 +133,16 @@ def is_public_youtube(url, media_meta=None):
     extractor = str((media_meta or {}).get("extractor") or "").lower()
     if "youtube" in extractor:
         return True
-    host = (urlsplit(str((media_meta or {}).get("webpage_url") or url)).hostname or "").lower().rstrip(".")
-    return host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com")
+    return youtube_runtime.is_youtube_url((media_meta or {}).get("webpage_url") or url)
 
 
 def media_content(req, media_meta=None):
+    media_meta = media_meta or detect_media(req["url"])
+    if is_public_youtube(req["url"], media_meta):
+        return youtube_runtime.collect_single_transcript(req, media_meta)
+
     language = req.get("language", "auto")
     lang_selector = "all,-live_chat" if language == "auto" else f"{language},{language}.*"
-    media_meta = media_meta or detect_media(req["url"])
     with tempfile.TemporaryDirectory(prefix="webactueel-transcribe-") as tmpdir:
         tmp = Path(tmpdir)
         subtitle_cmd = yt_base() + [
@@ -156,8 +161,6 @@ def media_content(req, media_meta=None):
                     "subtitle_command_exit": subtitle_run.returncode
                 }, ["yt-dlp:public-subtitles", "normalize:subtitle-lines"]
 
-        if is_public_youtube(req["url"], media_meta):
-            raise RuntimeError("Project Transcriberen policy: public YouTube sources are captions/metadata only; audio/video download and Whisper fallback are forbidden when public captions are unavailable")
         if not req.get("allow_audio_fallback"):
             raise RuntimeError("no usable public subtitles found and allow_audio_fallback=false")
         if not req.get("audio_access_authorized"):
@@ -249,47 +252,82 @@ def extract(req):
     return article_content(data, final_url)
 
 
-def main():
-    req = json.loads(Path(os.environ.get("REQUEST_FILE", "resolved-request.json")).read_text(encoding="utf-8"))
-    validate_public_url(req["url"])
-    RESULTS.mkdir(parents=True, exist_ok=True)
-    started = datetime.now(timezone.utc).isoformat()
-    content, detected_mode, metadata, transformations = extract(req)
-    normalized = content.strip() + "\n"
-    result = {
-        "schema_version": "webactueel-transcription-result/1.0",
+def common_result(req, started, normalized, detected_mode, metadata, transformations):
+    persist = bool(req.get("analysis_content_allowed") or req.get("reuse_allowed"))
+    return {
+        "schema_version": "webactueel-transcription-result/1.1",
         "request_id": req["request_id"],
         "owner": "webactueel-workflow",
         "project_id": "project-transcriberen",
-        "source_url": req["url"],
+        "source_url": req.get("url"),
         "requested_mode": req["mode"],
         "detected_mode": detected_mode,
         "language": req.get("language", "auto"),
         "fetched_at": started,
         "completed_at": datetime.now(timezone.utc).isoformat(),
         "evidence_level": "controlled_runtime",
+        "analysis_content_allowed": bool(req.get("analysis_content_allowed")),
         "reuse_allowed": bool(req.get("reuse_allowed")),
+        "usage_mode": "reuse-authorized" if req.get("reuse_allowed") else "analysis-paraphrase-only",
         "rights_basis": req.get("rights_basis"),
         "audio_access_authorized": bool(req.get("audio_access_authorized")),
         "content_sha256": sha256_text(normalized),
         "content_chars": len(normalized),
-        "content_persisted": bool(req.get("reuse_allowed")),
+        "content_persisted": persist,
         "metadata": metadata,
         "transformations": transformations,
         "tool_versions": tool_versions(),
         "source_context": req.get("source_context"),
         "limitations": [
-            "Transcriptie en extractie kunnen inhoudelijke fouten bevatten en vereisen bronvergelijking voor belangrijke claims.",
-            "controlled_runtime output is geen automatische projectwaarheid.",
-            "Publieke YouTube-bronnen zijn uitsluitend captions/metadata; audio/video-download en Whisper-fallback zijn daar geblokkeerd.",
-            "De runtime omzeilt geen login, cookies, DRM of paywalls."
+            "Transcriptie, captionextractie en metadata-extractie kunnen inhoudelijke fouten bevatten en vereisen bronvergelijking voor belangrijke claims.",
+            "controlled_runtime output is geen automatische projectwaarheid; bruikbare kennis vereist inhoudelijke review en deduplicatie door webactueel-workflow.",
+            "Publieke YouTube-bronnen zijn uitsluitend captions/metadata/comments; audio/video-download en Whisper-fallback zijn daar geblokkeerd.",
+            "YouTube-zoekrangschikking geldt alleen binnen de opgehaalde kandidaatset en is geen globale YouTube-ranking.",
+            "Publieke comments kunnen persoonsgegevens bevatten en mogen alleen taakgericht voor analyse worden gebruikt.",
+            "De runtime omzeilt geen login, cookies, DRM, paywalls, CAPTCHA of leeftijdscontrole."
         ]
     }
-    if req.get("reuse_allowed"):
-        (RESULTS / "content.md").write_text(normalized, encoding="utf-8")
+
+
+def main():
+    req = json.loads(Path(os.environ.get("REQUEST_FILE", "resolved-request.json")).read_text(encoding="utf-8"))
+    if req.get("url"):
+        validate_public_url(req["url"])
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    started = datetime.now(timezone.utc).isoformat()
+
+    if req["mode"] == "youtube":
+        content, index = youtube_runtime.collect(req, RESULTS)
+        normalized = content.strip() + "\n"
+        metadata = {
+            "youtube": {
+                "scope": index["scope"],
+                "query": index.get("query"),
+                "candidate_count": index["candidate_count"],
+                "eligible_count": index["eligible_count"],
+                "item_count": index["item_count"],
+                "sort_by": index["sort_by"],
+                "year_from": index.get("year_from"),
+                "year_to": index.get("year_to"),
+                "include_comments": index["include_comments"],
+                "index_file": "youtube-index.json",
+                "media_downloaded": False,
+            }
+        }
+        result = common_result(
+            req, started, normalized, "youtube", metadata,
+            ["yt-dlp:youtube-discovery", "yt-dlp:metadata-only", "yt-dlp:single-selected-caption", "normalize:subtitle-lines", "optional:public-comments"]
+        )
+    else:
+        content, detected_mode, metadata, transformations = extract(req)
+        normalized = content.strip() + "\n"
+        result = common_result(req, started, normalized, detected_mode, metadata, transformations)
+        if result["content_persisted"]:
+            (RESULTS / "content.md").write_text(normalized, encoding="utf-8")
+
     (RESULTS / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (RESULTS / "tool-versions.txt").write_text("\n".join(f"{key}={value}" for key, value in result["tool_versions"].items()) + "\n", encoding="utf-8")
-    print(json.dumps({"request_id": req["request_id"], "mode": detected_mode, "content_sha256": result["content_sha256"], "content_persisted": result["content_persisted"]}))
+    print(json.dumps({"request_id": req["request_id"], "mode": result["detected_mode"], "content_sha256": result["content_sha256"], "content_persisted": result["content_persisted"]}))
 
 
 if __name__ == "__main__":
