@@ -7,17 +7,38 @@ import socket
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
 
+ROOT = Path(__file__).resolve().parents[1]
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,79}$")
 LANG_RE = re.compile(r"^(?:auto|[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,16})?)$")
 MODES = {"auto", "media", "article", "feed", "sitemap", "youtube"}
-YT_SCOPES = {"video", "short", "search", "playlist", "channel_videos", "channel_shorts", "channel_all"}
-YT_BULK_SCOPES = {"playlist", "channel_videos", "channel_shorts", "channel_all"}
+YT_SCOPES = {
+    "video", "short", "search", "playlist", "channel_videos", "channel_shorts",
+    "channel_streams", "channel_all",
+}
+YT_BULK_SCOPES = {"playlist", "channel_videos", "channel_shorts", "channel_streams", "channel_all"}
 YT_SORTS = {"relevance", "views", "likes", "comments", "newest", "random"}
 COMMENT_SORTS = {"top", "new"}
-SECRET_KEY_RE = re.compile(r"(?:token|secret|api[_-]?key|access[_-]?key|password|passwd|authorization|signature|sig|credential)", re.I)
+COMMENT_SELECTIONS = {"platform", "knowledge"}
+YOUTUBE_ACCESS_BASES = {"prior-written-permission", "applicable-law-reviewed"}
+ALLOWED_KNOWLEDGE_OWNERS = {
+    "webactueel-workflow", "leads", "seo", "design", "elementor",
+    "wordpressqualityarchitect", "website-qa-checklist",
+}
+SECRET_KEY_RE = re.compile(
+    r"(?:token|secret|api[_-]?key|access[_-]?key|password|passwd|authorization|signature|sig|credential)",
+    re.I,
+)
 UNVERIFIED_RIGHTS = {"unknown", "unverified"}
 SOURCE_SET_PLACEHOLDERS = {"manual-dispatch", "set-at-execution", "unknown", "unset", "placeholder"}
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
+MAX_BOUNDED_ITEMS = 250
+MAX_BOUNDED_SCAN = 1000
+MAX_BOUNDED_COMMENTS_PER_ITEM = 1000
+MAX_BOUNDED_COMMENT_BUDGET = 20_000
+MAX_HARD_ITEMS = 1000
+MAX_HARD_SCAN = 5000
+MAX_HARD_COMMENTS_PER_ITEM = 5000
+MAX_COMMENT_REVIEW = 200
 
 
 def as_bool(value, default=False):
@@ -44,6 +65,31 @@ def as_int(value, *, default=None, minimum=None, maximum=None, name="integer"):
     return parsed
 
 
+def current_source_set_version():
+    contract_path = ROOT / "toolkit-contract.json"
+    try:
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValueError(f"cannot read toolkit source-set contract: {exc}") from exc
+    value = str(contract.get("source_set_version") or "").strip()
+    if not value or value.casefold() in SOURCE_SET_PLACEHOLDERS:
+        raise ValueError("toolkit-contract.json must contain a concrete source_set_version")
+    return value
+
+
+def _resolve_public_addresses(hostname, port):
+    infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    if not infos:
+        raise ValueError("hostname did not resolve")
+    addresses = []
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if any((ip.is_private, ip.is_loopback, ip.is_link_local, ip.is_multicast, ip.is_reserved, ip.is_unspecified)):
+            raise ValueError(f"non-public target address rejected: {ip}")
+        addresses.append(str(ip))
+    return tuple(dict.fromkeys(addresses))
+
+
 def validate_public_url(raw):
     parts = urlsplit(str(raw))
     if parts.scheme not in {"http", "https"} or not parts.hostname:
@@ -53,13 +99,7 @@ def validate_public_url(raw):
     for key, _ in parse_qsl(parts.query, keep_blank_values=True):
         if SECRET_KEY_RE.search(key):
             raise ValueError(f"secret-like query parameter is forbidden: {key}")
-    infos = socket.getaddrinfo(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80), type=socket.SOCK_STREAM)
-    if not infos:
-        raise ValueError("hostname did not resolve")
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if any((ip.is_private, ip.is_loopback, ip.is_link_local, ip.is_multicast, ip.is_reserved, ip.is_unspecified)):
-            raise ValueError(f"non-public target address rejected: {ip}")
+    _resolve_public_addresses(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80))
     return raw
 
 
@@ -77,7 +117,7 @@ def validate_youtube_scope_url(raw, scope):
     host = (parts.hostname or "").lower().rstrip(".")
     path = parts.path.rstrip("/") or "/"
     params = dict(parse_qsl(parts.query, keep_blank_values=True))
-    if scope in {"channel_videos", "channel_shorts", "channel_all"}:
+    if scope in {"channel_videos", "channel_shorts", "channel_streams", "channel_all"}:
         if host == "youtu.be" or path in {"/watch", "/playlist", "/results"} or path.startswith(("/shorts/", "/live/", "/embed/")):
             raise ValueError(f"youtube.scope={scope} requires a channel URL")
     elif scope == "playlist":
@@ -93,6 +133,40 @@ def validate_youtube_scope_url(raw, scope):
         if not direct:
             raise ValueError("youtube.scope=video requires a direct YouTube video URL")
     return raw
+
+
+def validate_knowledge_context(req, yt):
+    selection = str(yt.get("comment_selection", "platform"))
+    if selection not in COMMENT_SELECTIONS:
+        raise ValueError("invalid youtube.comment_selection")
+    yt["comment_selection"] = selection
+    yt["comment_review_limit"] = as_int(
+        yt.get("comment_review_limit"), default=50, minimum=0, maximum=MAX_COMMENT_REVIEW,
+        name="youtube.comment_review_limit",
+    )
+    if selection != "knowledge":
+        return
+    if not yt.get("include_comments"):
+        raise ValueError("youtube.comment_selection=knowledge requires include_comments=true")
+    context = req.get("knowledge_context")
+    if not isinstance(context, dict):
+        raise ValueError("knowledge_context is required for knowledge comment selection")
+    goal = str(context.get("goal") or "").strip()
+    if len(goal) < 5 or len(goal) > 800:
+        raise ValueError("knowledge_context.goal must be 5..800 characters")
+    owner = str(context.get("target_owner") or "").strip()
+    if owner not in ALLOWED_KNOWLEDGE_OWNERS:
+        raise ValueError("knowledge_context.target_owner must be a registered Webactueel owner")
+    keywords = context.get("keywords", [])
+    if not isinstance(keywords, list) or len(keywords) > 30:
+        raise ValueError("knowledge_context.keywords must be a list of at most 30 values")
+    clean_keywords = []
+    for value in keywords:
+        text = str(value).strip()
+        if not text or len(text) > 80:
+            raise ValueError("knowledge_context keywords must be 1..80 characters")
+        clean_keywords.append(text)
+    req["knowledge_context"] = {"goal": goal, "target_owner": owner, "keywords": clean_keywords}
 
 
 def validate_youtube(req):
@@ -119,12 +193,17 @@ def validate_youtube(req):
     yt["sort_by"] = str(yt.get("sort_by", "relevance"))
     if yt["sort_by"] not in YT_SORTS:
         raise ValueError("invalid youtube.sort_by")
-    yt["max_items"] = as_int(yt.get("max_items"), default=20, minimum=0, maximum=10000, name="youtube.max_items")
+    yt["max_items"] = as_int(yt.get("max_items"), default=20, minimum=0, maximum=MAX_HARD_ITEMS, name="youtube.max_items")
     yt["candidate_limit"] = as_int(yt.get("candidate_limit"), default=100, minimum=1, maximum=500, name="youtube.candidate_limit")
-    yt["scan_limit"] = as_int(yt.get("scan_limit"), default=500, minimum=0, maximum=10000, name="youtube.scan_limit")
+    yt["scan_limit"] = as_int(yt.get("scan_limit"), default=500, minimum=0, maximum=MAX_HARD_SCAN, name="youtube.scan_limit")
     yt["allow_unbounded"] = as_bool(yt.get("allow_unbounded"), False)
     if scope in YT_BULK_SCOPES and yt["scan_limit"] == 0 and not yt["allow_unbounded"]:
         raise ValueError("youtube.scan_limit=0 requires youtube.allow_unbounded=true for bulk scopes")
+    if not yt["allow_unbounded"]:
+        if yt["max_items"] > MAX_BOUNDED_ITEMS:
+            raise ValueError(f"youtube.max_items>{MAX_BOUNDED_ITEMS} requires youtube.allow_unbounded=true")
+        if yt["scan_limit"] > MAX_BOUNDED_SCAN:
+            raise ValueError(f"youtube.scan_limit>{MAX_BOUNDED_SCAN} requires youtube.allow_unbounded=true")
 
     yt["year_from"] = as_int(yt.get("year_from"), default=None, minimum=2005, maximum=2100, name="youtube.year_from")
     yt["year_to"] = as_int(yt.get("year_to"), default=None, minimum=2005, maximum=2100, name="youtube.year_to")
@@ -139,10 +218,20 @@ def validate_youtube(req):
         raise ValueError("invalid youtube.comment_sort")
     max_comments = str(yt.get("max_comments", "200")).strip().lower()
     if max_comments != "all":
-        max_comments = str(as_int(max_comments, minimum=0, maximum=1000000, name="youtube.max_comments"))
-    if yt["include_comments"] and max_comments == "all" and not yt["allow_unbounded"]:
-        raise ValueError("youtube.max_comments=all requires youtube.allow_unbounded=true")
+        max_comments_int = as_int(max_comments, minimum=0, maximum=MAX_HARD_COMMENTS_PER_ITEM, name="youtube.max_comments")
+        if not yt["allow_unbounded"] and max_comments_int > MAX_BOUNDED_COMMENTS_PER_ITEM:
+            raise ValueError(f"youtube.max_comments>{MAX_BOUNDED_COMMENTS_PER_ITEM} requires youtube.allow_unbounded=true")
+        selected_budget = yt["max_items"] if yt["max_items"] > 0 else min(yt["scan_limit"] or MAX_BOUNDED_ITEMS, MAX_BOUNDED_ITEMS)
+        if not yt["allow_unbounded"] and selected_budget * max_comments_int > MAX_BOUNDED_COMMENT_BUDGET:
+            raise ValueError(f"bounded YouTube comment budget may not exceed {MAX_BOUNDED_COMMENT_BUDGET} records")
+        max_comments = str(max_comments_int)
+    elif yt["include_comments"]:
+        if not yt["allow_unbounded"]:
+            raise ValueError("youtube.max_comments=all requires youtube.allow_unbounded=true")
+        if yt["max_items"] == 0 or yt["max_items"] > 5:
+            raise ValueError("youtube.max_comments=all requires youtube.max_items between 1 and 5")
     yt["max_comments"] = max_comments
+    validate_knowledge_context(req, yt)
     return req
 
 
@@ -166,8 +255,9 @@ def validate_request(req):
     req["language"] = str(req.get("language", "auto"))
     req["allow_audio_fallback"] = as_bool(req.get("allow_audio_fallback"), False)
     req["audio_access_authorized"] = as_bool(req.get("audio_access_authorized"), False)
-    req["analysis_content_allowed"] = as_bool(req.get("analysis_content_allowed"), req.get("mode") == "youtube")
+    req["analysis_content_allowed"] = as_bool(req.get("analysis_content_allowed"), False)
     req["reuse_allowed"] = as_bool(req.get("reuse_allowed"), False)
+    req["public_request_acknowledged"] = as_bool(req.get("public_request_acknowledged"), False)
 
     basis = str(req.get("rights_basis", "")).strip()
     if not basis or len(basis) > 200:
@@ -182,12 +272,28 @@ def validate_request(req):
         if basis.lower() in UNVERIFIED_RIGHTS | {"analysis-only", "analysis-paraphrase-only"}:
             raise ValueError("audio fallback requires a concrete authorization/rights_basis")
 
+    if req.get("mode") == "youtube":
+        access_basis = str(req.get("youtube_access_basis") or "").strip().lower()
+        if access_basis not in YOUTUBE_ACCESS_BASES:
+            raise ValueError("public YouTube automated access requires youtube_access_basis=prior-written-permission or applicable-law-reviewed")
+        req["youtube_access_basis"] = access_basis
+
     context = req.get("source_context")
     source_set_version = str((context or {}).get("source_set_version", "")).strip()
     if not isinstance(context, dict) or context.get("project_id") != "project-transcriberen" or not source_set_version:
         raise ValueError("valid source_context is required")
     if source_set_version.casefold() in SOURCE_SET_PLACEHOLDERS:
         raise ValueError("source_context.source_set_version must name a concrete current source set")
+    expected = current_source_set_version()
+    if source_set_version != expected:
+        raise ValueError(f"source_context.source_set_version={source_set_version!r} does not match current toolkit source set {expected!r}")
+
+    visibility = str(os.environ.get("GITHUB_REPOSITORY_VISIBILITY", "")).strip().lower()
+    if visibility == "public":
+        if not req["public_request_acknowledged"]:
+            raise ValueError("public GitHub execution requires public_request_acknowledged=true because request data may be visible in public workflow metadata, logs or artifacts")
+        if req["analysis_content_allowed"] or req["reuse_allowed"]:
+            raise ValueError("public GitHub execution may not persist transcript/comment source content; use a private/local runtime for content analysis")
     return req
 
 
@@ -208,7 +314,10 @@ def from_dispatch():
         "include_comments": as_bool(os.environ.get("INPUT_YOUTUBE_INCLUDE_COMMENTS"), False),
         "comment_sort": os.environ.get("INPUT_YOUTUBE_COMMENT_SORT", "top"),
         "max_comments": os.environ.get("INPUT_YOUTUBE_MAX_COMMENTS", "200"),
+        "comment_selection": os.environ.get("INPUT_YOUTUBE_COMMENT_SELECTION", "platform"),
+        "comment_review_limit": os.environ.get("INPUT_YOUTUBE_COMMENT_REVIEW_LIMIT", "50"),
     }
+    keywords = [item.strip() for item in os.environ.get("INPUT_KNOWLEDGE_KEYWORDS", "").split(",") if item.strip()]
     return {
         "enabled": True,
         "request_id": f"dispatch-{os.environ.get('GITHUB_RUN_ID', 'manual')}",
@@ -219,15 +328,22 @@ def from_dispatch():
         "language": os.environ.get("INPUT_LANGUAGE", "auto"),
         "allow_audio_fallback": as_bool(os.environ.get("INPUT_ALLOW_AUDIO_FALLBACK"), False),
         "audio_access_authorized": as_bool(os.environ.get("INPUT_AUDIO_ACCESS_AUTHORIZED"), False),
-        "analysis_content_allowed": as_bool(os.environ.get("INPUT_ANALYSIS_CONTENT_ALLOWED"), True),
+        "analysis_content_allowed": as_bool(os.environ.get("INPUT_ANALYSIS_CONTENT_ALLOWED"), False),
         "reuse_allowed": as_bool(os.environ.get("INPUT_REUSE_ALLOWED"), False),
         "rights_basis": os.environ.get("INPUT_RIGHTS_BASIS", "analysis-paraphrase-only"),
+        "youtube_access_basis": os.environ.get("INPUT_YOUTUBE_ACCESS_BASIS", "unverified"),
+        "public_request_acknowledged": as_bool(os.environ.get("INPUT_PUBLIC_REQUEST_ACKNOWLEDGED"), False),
         "youtube": youtube,
+        "knowledge_context": {
+            "goal": os.environ.get("INPUT_KNOWLEDGE_GOAL", ""),
+            "target_owner": os.environ.get("INPUT_KNOWLEDGE_TARGET_OWNER", "webactueel-workflow"),
+            "keywords": keywords,
+        },
         "requested_by": "workflow_dispatch",
         "source_context": {
             "project_id": "project-transcriberen",
-            "source_set_version": os.environ.get("INPUT_SOURCE_SET_VERSION", "")
-        }
+            "source_set_version": os.environ.get("INPUT_SOURCE_SET_VERSION", ""),
+        },
     }
 
 
