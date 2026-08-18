@@ -11,6 +11,7 @@ ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,79}$")
 LANG_RE = re.compile(r"^(?:auto|[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,16})?)$")
 MODES = {"auto", "media", "article", "feed", "sitemap", "youtube"}
 YT_SCOPES = {"video", "short", "search", "playlist", "channel_videos", "channel_shorts", "channel_all"}
+YT_BULK_SCOPES = {"playlist", "channel_videos", "channel_shorts", "channel_all"}
 YT_SORTS = {"relevance", "views", "likes", "comments", "newest"}
 COMMENT_SORTS = {"top", "new"}
 SECRET_KEY_RE = re.compile(r"(?:token|secret|api[_-]?key|access[_-]?key|password|passwd|authorization|signature|sig|credential)", re.I)
@@ -69,6 +70,30 @@ def validate_youtube_url(raw):
     return raw
 
 
+def validate_youtube_scope_url(raw, scope):
+    validate_youtube_url(raw)
+    parts = urlsplit(str(raw))
+    host = (parts.hostname or "").lower().rstrip(".")
+    path = parts.path.rstrip("/") or "/"
+    params = dict(parse_qsl(parts.query, keep_blank_values=True))
+    if scope in {"channel_videos", "channel_shorts", "channel_all"}:
+        if host == "youtu.be" or path in {"/watch", "/playlist", "/results"} or path.startswith(("/shorts/", "/live/", "/embed/")):
+            raise ValueError(f"youtube.scope={scope} requires a channel URL")
+    elif scope == "playlist":
+        if not params.get("list"):
+            raise ValueError("youtube.scope=playlist requires a URL with a list parameter")
+    elif scope == "short":
+        if not path.startswith("/shorts/") or len(path.split("/")) < 3:
+            raise ValueError("youtube.scope=short requires a /shorts/<id> URL")
+    elif scope == "video":
+        direct = host == "youtu.be" and path != "/"
+        direct = direct or (path == "/watch" and bool(params.get("v")))
+        direct = direct or path.startswith(("/live/", "/embed/", "/v/"))
+        if not direct:
+            raise ValueError("youtube.scope=video requires a direct YouTube video URL")
+    return raw
+
+
 def validate_youtube(req):
     yt = req.get("youtube")
     if yt is None:
@@ -88,13 +113,18 @@ def validate_youtube(req):
         yt["query"] = query
         req["url"] = None
     else:
-        validate_youtube_url(req.get("url", ""))
+        validate_youtube_scope_url(req.get("url", ""), scope)
 
     yt["sort_by"] = str(yt.get("sort_by", "relevance"))
     if yt["sort_by"] not in YT_SORTS:
         raise ValueError("invalid youtube.sort_by")
     yt["max_items"] = as_int(yt.get("max_items"), default=20, minimum=0, maximum=10000, name="youtube.max_items")
     yt["candidate_limit"] = as_int(yt.get("candidate_limit"), default=100, minimum=1, maximum=500, name="youtube.candidate_limit")
+    yt["scan_limit"] = as_int(yt.get("scan_limit"), default=500, minimum=0, maximum=10000, name="youtube.scan_limit")
+    yt["allow_unbounded"] = as_bool(yt.get("allow_unbounded"), False)
+    if scope in YT_BULK_SCOPES and yt["scan_limit"] == 0 and not yt["allow_unbounded"]:
+        raise ValueError("youtube.scan_limit=0 requires youtube.allow_unbounded=true for bulk scopes")
+
     yt["year_from"] = as_int(yt.get("year_from"), default=None, minimum=2005, maximum=2100, name="youtube.year_from")
     yt["year_to"] = as_int(yt.get("year_to"), default=None, minimum=2005, maximum=2100, name="youtube.year_to")
     if yt["year_from"] and yt["year_to"] and yt["year_from"] > yt["year_to"]:
@@ -109,6 +139,8 @@ def validate_youtube(req):
     max_comments = str(yt.get("max_comments", "200")).strip().lower()
     if max_comments != "all":
         max_comments = str(as_int(max_comments, minimum=0, maximum=1000000, name="youtube.max_comments"))
+    if yt["include_comments"] and max_comments == "all" and not yt["allow_unbounded"]:
+        raise ValueError("youtube.max_comments=all requires youtube.allow_unbounded=true")
     yt["max_comments"] = max_comments
     return req
 
@@ -162,6 +194,8 @@ def from_dispatch():
         "sort_by": os.environ.get("INPUT_YOUTUBE_SORT_BY", "relevance"),
         "max_items": os.environ.get("INPUT_YOUTUBE_MAX_ITEMS", "20"),
         "candidate_limit": os.environ.get("INPUT_YOUTUBE_CANDIDATE_LIMIT", "100"),
+        "scan_limit": os.environ.get("INPUT_YOUTUBE_SCAN_LIMIT", "500"),
+        "allow_unbounded": as_bool(os.environ.get("INPUT_YOUTUBE_ALLOW_UNBOUNDED"), False),
         "year_from": os.environ.get("INPUT_YOUTUBE_YEAR_FROM", ""),
         "year_to": os.environ.get("INPUT_YOUTUBE_YEAR_TO", ""),
         "min_views": os.environ.get("INPUT_YOUTUBE_MIN_VIEWS", ""),
