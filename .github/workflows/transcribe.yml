@@ -56,9 +56,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: transcribe-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   resolve:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       run: ${{ steps.resolve.outputs.run }}
       request_id: ${{ steps.resolve.outputs.request_id }}
@@ -67,6 +72,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Resolve and validate request
         id: resolve
         env:
@@ -81,6 +89,7 @@ jobs:
           INPUT_RIGHTS_BASIS: ${{ inputs.rights_basis }}
           INPUT_SOURCE_SET_VERSION: ${{ inputs.source_set_version }}
         run: python3 scripts/resolve_request.py
+
       - name: Upload resolved request for runtime job
         if: steps.resolve.outputs.run == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -98,6 +107,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python 3.12
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -109,15 +120,19 @@ jobs:
         with:
           name: resolved-transcription-request
 
-      - name: Install locked Python extraction dependency
-        run: python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+      - name: Install verified Python extraction dependency
+        run: bash scripts/install_python_deps.sh
 
       - name: Install FFmpeg runtime
+        shell: bash
         run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ffmpeg
-          ffmpeg -version | head -n 1
-          ffprobe -version | head -n 1
+          command -v ffmpeg
+          command -v ffprobe
+          ffmpeg -version
+          ffprobe -version
 
       - name: Install pinned local media/transcription tools
         run: bash scripts/install_tools.sh '${{ needs.resolve.outputs.install_whisper }}'
@@ -127,7 +142,9 @@ jobs:
           REQUEST_FILE: resolved-request.json
         run: python scripts/entrypoint.py
 
-      - name: Validate result contract and rights gate
+      - name: Validate result contract, provenance and rights gate
+        env:
+          REQUEST_FILE: resolved-request.json
         run: python scripts/validate_result.py results/result.json
 
       - name: Publish provenance summary
@@ -139,7 +156,17 @@ jobs:
           echo "Request: ${{ needs.resolve.outputs.request_id }}" >> "$GITHUB_STEP_SUMMARY"
           echo "Content persistence requested: ${{ needs.resolve.outputs.reuse_allowed }}" >> "$GITHUB_STEP_SUMMARY"
           if [ -f results/result.json ]; then
-            python -c 'import json; r=json.load(open("results/result.json", encoding="utf-8")); print("Detected mode: {}\nEvidence level: {}\nContent persisted: {}\nContent SHA-256: {}".format(r.get("detected_mode"), r.get("evidence_level"), r.get("content_persisted"), r.get("content_sha256")))' >> "$GITHUB_STEP_SUMMARY"
+            python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          r = json.load(open('results/result.json', encoding='utf-8'))
+          p = r.get('provenance', {})
+          print('Detected mode: {}'.format(r.get('detected_mode')))
+          print('Evidence level: {}'.format(r.get('evidence_level')))
+          print('Content persisted: {}'.format(r.get('content_persisted')))
+          print('Content SHA-256: {}'.format(r.get('content_sha256')))
+          print('Request SHA-256: {}'.format(p.get('request_sha256')))
+          print('Repository commit: {}'.format(p.get('repository_commit')))
+          PY
           fi
 
       - name: Upload normalized result

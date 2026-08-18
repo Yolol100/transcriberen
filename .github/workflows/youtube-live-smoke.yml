@@ -1,6 +1,10 @@
 name: YouTube Availability Probe
 
 on:
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/youtube-live-smoke.yml'
   workflow_dispatch:
     inputs:
       channel:
@@ -8,9 +12,15 @@ on:
         required: true
         default: 'https://www.youtube.com/@OpenAI'
         type: string
+  schedule:
+    - cron: '23 5 * * 1'
 
 permissions:
   contents: read
+
+concurrency:
+  group: youtube-availability-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   probe-youtube:
@@ -19,25 +29,29 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python 3.12
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
 
-      - name: Install Python dependency
-        run: python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+      - name: Install verified Python dependency
+        run: bash scripts/install_python_deps.sh
 
       - name: Install accountless YouTube toolchain
         run: bash scripts/install_tools.sh false
 
       - name: Probe public channel discovery and captions without credentials
         env:
-          PROBE_CHANNEL: ${{ inputs.channel }}
+          PROBE_CHANNEL: ${{ inputs.channel || 'https://www.youtube.com/@OpenAI' }}
         run: |
           python - <<'PY'
+          import json
           import os
           import sys
+          from datetime import datetime, timezone
           from pathlib import Path
 
           sys.path.insert(0, str(Path('scripts').resolve()))
@@ -45,12 +59,27 @@ jobs:
           import runtime
 
           channel = os.environ['PROBE_CHANNEL']
-          videos = entrypoint.discover_youtube_videos(channel, 10)
-          if not videos:
-              raise SystemExit('No public videos discovered')
+          result = {
+              'schema_version': 'webactueel-youtube-availability/1.0',
+              'checked_at': datetime.now(timezone.utc).isoformat(),
+              'repository_commit': os.environ.get('GITHUB_SHA'),
+              'channel': channel,
+              'credentials_cookies_proxy_api_key': 'none',
+              'discovered': 0,
+              'caption_reachable': False,
+              'status': 'unknown',
+              'verified_video_id': None,
+              'verified_caption_chars': 0,
+              'failures': [],
+          }
+          try:
+              videos = entrypoint.discover_youtube_videos(channel, 10)
+          except Exception as exc:
+              result['status'] = 'discovery_error'
+              result['failures'].append(str(exc)[-1000:])
+              videos = []
+          result['discovered'] = len(videos)
 
-          caption_ok = None
-          failures = []
           for video in videos:
               req = {
                   'url': video['url'],
@@ -67,30 +96,43 @@ jobs:
               try:
                   text, source_type, _, _ = runtime.media_content(req, meta)
               except Exception as exc:
-                  failures.append(f"{video['id']}: {exc}")
+                  result['failures'].append(f"{video['id']}: {str(exc)[-800:]}")
+                  if entrypoint.is_runner_wide_caption_block(exc):
+                      break
                   continue
               if text.strip() and source_type == 'subtitle':
-                  caption_ok = (video, len(text))
+                  result['caption_reachable'] = True
+                  result['status'] = 'captions_reachable'
+                  result['verified_video_id'] = video['id']
+                  result['verified_caption_chars'] = len(text)
                   break
+
+          if videos and not result['caption_reachable'] and result['status'] == 'unknown':
+              result['status'] = 'captions_not_reachable_from_runner'
+          result['failures'] = result['failures'][-3:]
+          Path('youtube-availability.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
           summary = Path(os.environ['GITHUB_STEP_SUMMARY'])
           with summary.open('a', encoding='utf-8') as handle:
               handle.write('## YouTube availability probe\n\n')
-              handle.write(f'- Channel: `{channel}`\n')
-              handle.write(f'- Public videos discovered: `{len(videos)}`\n')
+              handle.write(f"- Channel: `{channel}`\n")
+              handle.write(f"- Public videos discovered: `{result['discovered']}`\n")
               handle.write('- Credentials/cookies/proxy/API key: `none`\n')
-              if caption_ok:
-                  handle.write('- Public captions reachable from this runner: `yes`\n')
-                  handle.write(f"- Verified video: `{caption_ok[0]['id']}` ({caption_ok[1]} chars)\n")
-              else:
-                  handle.write('- Public captions reachable from this runner: `no`\n')
-                  handle.write('- Meaning: YouTube blocked or exposed no usable captions from this hosted runner. The repo does not bypass that with login, cookies, proxy, audio download or an external transcript service.\n')
+              handle.write(f"- Status: `{result['status']}`\n")
+              handle.write(f"- Public captions reachable from this runner: `{'yes' if result['caption_reachable'] else 'no'}`\n")
+              if result['verified_video_id']:
+                  handle.write(f"- Verified video: `{result['verified_video_id']}` ({result['verified_caption_chars']} chars)\n")
+              if not result['caption_reachable']:
+                  handle.write('- This is availability evidence, not a bypass attempt; login, cookies, proxy, audio download and external transcript fallback remain disabled.\n')
 
-          print(f'discovered={len(videos)}')
-          if caption_ok:
-              print(f"caption_ok={caption_ok[0]['id']} chars={caption_ok[1]}")
-          else:
-              print('caption_available=false')
-              for failure in failures[-3:]:
-                  print(failure, file=sys.stderr)
+          print(json.dumps(result, ensure_ascii=False))
           PY
+
+      - name: Upload availability evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: youtube-availability-${{ github.run_id }}
+          path: youtube-availability.json
+          retention-days: 30
+          if-no-files-found: warn

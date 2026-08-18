@@ -1,9 +1,11 @@
+import hashlib
 import importlib.util
 import json
 import pathlib
 import sys
 import types
 import unittest
+from unittest.mock import patch
 
 
 class CaptionUnavailableError(RuntimeError):
@@ -17,8 +19,11 @@ class CaptionAccessError(RuntimeError):
 runtime = types.SimpleNamespace(
     RESULTS=pathlib.Path("results"),
     BIN=pathlib.Path("tools/bin"),
+    SUBTITLE_TIMEOUT_SECONDS=180,
     CaptionUnavailableError=CaptionUnavailableError,
     CaptionAccessError=CaptionAccessError,
+    media_content=lambda *args, **kwargs: None,
+    sha256_text=lambda text: hashlib.sha256(text.encode("utf-8")).hexdigest(),
 )
 sys.modules.setdefault("runtime", runtime)
 MODULE_PATH = pathlib.Path(__file__).parents[1] / "scripts" / "entrypoint.py"
@@ -48,19 +53,16 @@ class YoutubeCollectionTests(unittest.TestCase):
         )
 
     def test_explicit_channel_tab_is_not_expanded_again(self):
-        self.assertEqual(
-            entrypoint.collection_targets("https://www.youtube.com/@OpenAI/shorts"),
-            ["https://www.youtube.com/@OpenAI/shorts"],
-        )
+        self.assertEqual(entrypoint.collection_targets("https://www.youtube.com/@OpenAI/shorts"), ["https://www.youtube.com/@OpenAI/shorts"])
 
     def test_playlist_url_is_preserved(self):
         url = "https://www.youtube.com/playlist?list=PL123"
         self.assertEqual(entrypoint.collection_targets(url), [url])
 
-    def test_zero_max_items_uses_safety_cap_and_accountless_flags(self):
+    def test_zero_max_items_uses_safety_cap_and_direct_accountless_flags(self):
         captured = []
 
-        def fake_run(command, check=False):
+        def fake_run(command, check=False, timeout=None):
             captured.append(command)
             return types.SimpleNamespace(returncode=0, stdout='{"id":"abcdefghijk","title":"One"}\n', stderr="")
 
@@ -69,15 +71,15 @@ class YoutubeCollectionTests(unittest.TestCase):
         self.assertEqual(len(videos), 1)
         self.assertEqual(len(captured), 3)
         first = captured[0]
-        index = first.index("--playlist-end")
-        self.assertEqual(first[index + 1], str(entrypoint.MAX_COLLECTION_VIDEOS + 1))
+        self.assertEqual(first[first.index("--playlist-end") + 1], str(entrypoint.MAX_COLLECTION_VIDEOS + 1))
         self.assertIn("--skip-download", first)
         self.assertIn("--no-cookies", first)
+        self.assertEqual(first[first.index("--proxy") + 1], "")
         self.assertNotIn("--no-netrc", first)
         self.assertNotIn("--no-playlist", first)
 
     def test_duplicates_across_tabs_are_returned_once(self):
-        def fake_run(command, check=False):
+        def fake_run(command, check=False, timeout=None):
             return types.SimpleNamespace(returncode=0, stdout='{"id":"abcdefghijk","title":"One"}\n', stderr="")
 
         entrypoint.runtime.run = fake_run
@@ -91,7 +93,7 @@ class YoutubeCollectionTests(unittest.TestCase):
             "/streams": [],
         }
 
-        def fake_run(command, check=False):
+        def fake_run(command, check=False, timeout=None):
             target = command[-1]
             limit = int(command[command.index("--playlist-end") + 1])
             suffix = next(key for key in by_target if target.endswith(key))
@@ -105,14 +107,13 @@ class YoutubeCollectionTests(unittest.TestCase):
     def test_positive_max_items_is_bounded(self):
         captured = []
 
-        def fake_run(command, check=False):
+        def fake_run(command, check=False, timeout=None):
             captured.append(command)
             return types.SimpleNamespace(returncode=0, stdout='{"id":"abcdefghijk","title":"One"}\n', stderr="")
 
         entrypoint.runtime.run = fake_run
         entrypoint.discover_youtube_videos("https://www.youtube.com/@OpenAI", 25)
-        index = captured[0].index("--playlist-end")
-        self.assertEqual(captured[0][index + 1], "26")
+        self.assertEqual(captured[0][captured[0].index("--playlist-end") + 1], "26")
 
     def test_caption_failures_are_not_all_called_missing_captions(self):
         self.assertEqual(entrypoint.classify_caption_failure(CaptionUnavailableError("none")), "no_usable_captions")
@@ -137,12 +138,69 @@ class YoutubeCollectionTests(unittest.TestCase):
 
     def test_promotion_status_does_not_request_content_review_without_content(self):
         req = {"reuse_allowed": True}
-        blocked = {"captions_collected": 0, "caption_access_errors": 2, "processing_errors": 0}
-        empty = {"captions_collected": 0, "caption_access_errors": 0, "processing_errors": 0}
-        available = {"captions_collected": 1, "caption_access_errors": 0, "processing_errors": 0}
+        blocked = {"captions_collected": 0, "caption_access_errors": 2, "processing_errors": 0, "not_attempted_source_access_blocked": 0, "discovery_errors": []}
+        empty = {"captions_collected": 0, "caption_access_errors": 0, "processing_errors": 0, "not_attempted_source_access_blocked": 0, "discovery_errors": []}
+        available = {"captions_collected": 1, "caption_access_errors": 0, "processing_errors": 0, "not_attempted_source_access_blocked": 0, "discovery_errors": []}
         self.assertEqual(entrypoint.promotion_status(req, blocked), "source_access_blocked")
         self.assertEqual(entrypoint.promotion_status(req, empty), "no_content")
         self.assertEqual(entrypoint.promotion_status(req, available), "review_required")
+
+    def test_partial_discovery_is_recorded(self):
+        def fake_run(command, check=False, timeout=None):
+            target = command[-1]
+            if target.endswith("/shorts"):
+                return types.SimpleNamespace(returncode=1, stdout="", stderr="temporary discovery failure")
+            if target.endswith("/videos"):
+                return types.SimpleNamespace(returncode=0, stdout='{"id":"abcdefghijk","title":"One"}\n', stderr="")
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        entrypoint.runtime.run = fake_run
+        videos, diagnostics = entrypoint.discover_youtube_videos("https://www.youtube.com/@OpenAI", 0, include_diagnostics=True)
+        self.assertEqual(len(videos), 1)
+        self.assertEqual(diagnostics["status"], "partial")
+        self.assertEqual(len(diagnostics["errors"]), 1)
+        self.assertTrue(diagnostics["errors"][0]["target"].endswith("/shorts"))
+
+    def test_discovery_error_makes_otherwise_successful_scan_partial(self):
+        video = {"id": "abcdefghijk", "title": "One", "url": "https://www.youtube.com/watch?v=abcdefghijk", "source_target": "videos"}
+        diagnostics = {"targets_attempted": ["videos", "shorts"], "errors": [{"target": "shorts", "detail": "failed"}], "status": "partial"}
+        with patch.object(entrypoint, "discover_youtube_videos", return_value=([video], diagnostics)), \
+             patch.object(entrypoint.runtime, "media_content", return_value=("caption", "subtitle", {}, [])):
+            _, metadata = entrypoint.collection_content({"url": "https://www.youtube.com/@OpenAI", "max_items": 1})
+        self.assertEqual(metadata["captions_collected"], 1)
+        self.assertEqual(metadata["scan_status"], "partial")
+        self.assertEqual(metadata["discovery_status"], "partial")
+
+    def test_runner_wide_access_block_is_recognized(self):
+        self.assertTrue(entrypoint.is_runner_wide_caption_block(CaptionAccessError("Sign in to confirm you're not a bot")))
+        self.assertTrue(entrypoint.is_runner_wide_caption_block(CaptionAccessError("LOGIN_REQUIRED")))
+        self.assertFalse(entrypoint.is_runner_wide_caption_block(CaptionUnavailableError("none")))
+
+    def test_runner_wide_access_block_stops_caption_requests_and_marks_remaining(self):
+        videos = [
+            {"id": "aaaaaaaaaaa", "title": "A", "url": "https://www.youtube.com/watch?v=aaaaaaaaaaa", "source_target": "videos"},
+            {"id": "bbbbbbbbbbb", "title": "B", "url": "https://www.youtube.com/watch?v=bbbbbbbbbbb", "source_target": "videos"},
+            {"id": "ccccccccccc", "title": "C", "url": "https://www.youtube.com/watch?v=ccccccccccc", "source_target": "videos"},
+        ]
+        diagnostics = {"targets_attempted": ["videos"], "errors": [], "status": "complete"}
+        calls = []
+
+        def blocked(*args, **kwargs):
+            calls.append(1)
+            raise CaptionAccessError("Sign in to confirm you're not a bot")
+
+        with patch.object(entrypoint, "discover_youtube_videos", return_value=(videos, diagnostics)), \
+             patch.object(entrypoint.runtime, "media_content", side_effect=blocked):
+            _, metadata = entrypoint.collection_content({"url": "https://www.youtube.com/@OpenAI", "max_items": 3})
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(metadata["caption_access_errors"], 1)
+        self.assertEqual(metadata["not_attempted_source_access_blocked"], 2)
+        self.assertEqual(metadata["attempted_items"], 1)
+        self.assertEqual(metadata["not_attempted_items"], 2)
+        self.assertEqual(metadata["scan_status"], "source_access_blocked")
+        self.assertEqual([item["status"] for item in metadata["items"]], [
+            "caption_access_error", "not_attempted_source_access_blocked", "not_attempted_source_access_blocked",
+        ])
 
 
 if __name__ == "__main__":

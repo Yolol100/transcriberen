@@ -23,9 +23,7 @@ def is_youtube_collection_url(url):
     if query.get("list"):
         return True
     path = parts.path.rstrip("/")
-    if path.startswith("/@") or path.startswith("/channel/") or path.startswith("/c/") or path.startswith("/user/"):
-        return True
-    return False
+    return path.startswith("/@") or path.startswith("/channel/") or path.startswith("/c/") or path.startswith("/user/")
 
 
 def collection_targets(url):
@@ -44,27 +42,32 @@ def normalize_collection_url(url):
     return collection_targets(url)[0]
 
 
-def discover_youtube_videos(url, maximum):
+def discover_youtube_videos(url, maximum, include_diagnostics=False):
     maximum = int(maximum or 0)
     hard_limit = maximum if maximum > 0 else MAX_COLLECTION_VIDEOS
     videos = []
     seen = set()
     errors = []
+    targets_attempted = []
     truncated = False
 
     for target in collection_targets(url):
         if len(videos) >= hard_limit:
             truncated = True
             break
+        targets_attempted.append(target)
         command = [
             str(runtime.BIN / "yt-dlp"),
             "--no-config", "--no-cookies", "--no-warnings",
+            "--proxy", "", "--socket-timeout", "30",
+            "--retries", "3", "--extractor-retries", "3",
             "--skip-download", "--flat-playlist", "--dump-json",
             "--playlist-end", str(hard_limit + 1), target,
         ]
-        completed = runtime.run(command, check=False)
+        completed = runtime.run(command, check=False, timeout=runtime.SUBTITLE_TIMEOUT_SECONDS)
         if completed.returncode != 0:
-            errors.append(f"{target}: {completed.stderr[-1200:].strip() or 'yt-dlp discovery failed'}")
+            detail = (completed.stderr or completed.stdout)[-1200:].strip() or "yt-dlp discovery failed"
+            errors.append({"target": target, "detail": detail})
             continue
         for raw_line in completed.stdout.splitlines():
             try:
@@ -88,14 +91,19 @@ def discover_youtube_videos(url, maximum):
             break
 
     if not videos:
-        detail = "; ".join(errors) or "no public videos found"
+        detail = "; ".join(f"{item['target']}: {item['detail']}" for item in errors) or "no public videos found"
         raise RuntimeError("yt-dlp could not enumerate the YouTube channel/playlist: " + detail)
     if maximum == 0 and truncated:
         raise RuntimeError(
             f"YouTube collection exceeds safety cap of {MAX_COLLECTION_VIDEOS} videos; "
             "set max_items to process a bounded batch"
         )
-    return videos
+    diagnostics = {
+        "targets_attempted": targets_attempted,
+        "errors": errors,
+        "status": "partial" if errors else "complete",
+    }
+    return (videos, diagnostics) if include_diagnostics else videos
 
 
 def classify_caption_failure(exc):
@@ -106,18 +114,32 @@ def classify_caption_failure(exc):
     return "processing_error"
 
 
-def summarize_items(items):
+def is_runner_wide_caption_block(exc):
+    if not isinstance(exc, runtime.CaptionAccessError):
+        return False
+    text = str(exc).lower()
+    markers = (
+        "sign in to confirm", "not a bot", "login_required", "http error 429",
+        "too many requests", "requestblocked", "ipblocked",
+    )
+    return any(marker in text for marker in markers)
+
+
+def summarize_items(items, discovery_errors=None):
+    discovery_errors = discovery_errors or []
     counts = {
         "captions_collected": sum(1 for item in items if item["status"] == "captions_collected"),
         "captions_unavailable": sum(1 for item in items if item["status"] == "no_usable_captions"),
         "caption_access_errors": sum(1 for item in items if item["status"] == "caption_access_error"),
         "processing_errors": sum(1 for item in items if item["status"] == "processing_error"),
+        "not_attempted_source_access_blocked": sum(1 for item in items if item["status"] == "not_attempted_source_access_blocked"),
     }
     if counts["captions_collected"]:
-        scan_status = "partial" if counts["caption_access_errors"] or counts["processing_errors"] else "captions_collected"
-    elif counts["caption_access_errors"]:
+        degraded = counts["caption_access_errors"] or counts["processing_errors"] or counts["not_attempted_source_access_blocked"] or discovery_errors
+        scan_status = "partial" if degraded else "captions_collected"
+    elif counts["caption_access_errors"] or counts["not_attempted_source_access_blocked"]:
         scan_status = "source_access_blocked"
-    elif counts["processing_errors"]:
+    elif counts["processing_errors"] or discovery_errors:
         scan_status = "processing_error"
     else:
         scan_status = "no_usable_captions"
@@ -126,10 +148,22 @@ def summarize_items(items):
 
 def collection_content(req):
     maximum = int(req.get("max_items", 0))
-    videos = discover_youtube_videos(req["url"], maximum)
+    videos, discovery = discover_youtube_videos(req["url"], maximum, include_diagnostics=True)
     sections = []
     items = []
+    runner_blocked = False
     for index, video in enumerate(videos, start=1):
+        if runner_blocked:
+            items.append({
+                "index": index,
+                "video_id": video["id"],
+                "title": video["title"],
+                "url": video["url"],
+                "source_target": video["source_target"],
+                "status": "not_attempted_source_access_blocked",
+                "detail": "skipped after runner-wide source access block",
+            })
+            continue
         item_req = dict(req)
         item_req["url"] = video["url"]
         media_meta = {
@@ -141,15 +175,18 @@ def collection_content(req):
         try:
             text, source_type, metadata, transformations = runtime.media_content(item_req, media_meta)
         except Exception as exc:
+            status = classify_caption_failure(exc)
             items.append({
                 "index": index,
                 "video_id": video["id"],
                 "title": video["title"],
                 "url": video["url"],
                 "source_target": video["source_target"],
-                "status": classify_caption_failure(exc),
+                "status": status,
                 "detail": str(exc)[-1000:],
             })
+            if status == "caption_access_error" and is_runner_wide_caption_block(exc):
+                runner_blocked = True
             continue
         normalized = text.strip() + "\n"
         sections.append(
@@ -171,11 +208,16 @@ def collection_content(req):
             "transformations": transformations,
         })
     content = "\n\n---\n\n".join(sections).strip() + "\n" if sections else ""
-    counts, scan_status = summarize_items(items)
+    counts, scan_status = summarize_items(items, discovery["errors"])
     metadata = {
         "collection_targets": collection_targets(req["url"]),
+        "discovery_targets_attempted": discovery["targets_attempted"],
+        "discovery_status": discovery["status"],
+        "discovery_errors": discovery["errors"],
         "requested_items": "all" if maximum == 0 else maximum,
         "discovered_items": len(videos),
+        "attempted_items": len(items) - counts["not_attempted_source_access_blocked"],
+        "not_attempted_items": counts["not_attempted_source_access_blocked"],
         **counts,
         "scan_status": scan_status,
         "items": items,
@@ -188,7 +230,7 @@ def promotion_status(req, metadata):
         return "rights_review_required"
     if metadata["captions_collected"] > 0:
         return "review_required"
-    if metadata["caption_access_errors"] or metadata["processing_errors"]:
+    if metadata["caption_access_errors"] or metadata["processing_errors"] or metadata["not_attempted_source_access_blocked"] or metadata["discovery_errors"]:
         return "source_access_blocked"
     return "no_content"
 
@@ -204,6 +246,7 @@ def write_collection_result(req):
     transformations = ["yt-dlp:collection-discovery"]
     if content_available:
         transformations.extend(["yt-dlp:public-subtitles", "normalize:subtitle-lines"])
+    provenance = runtime.runtime_provenance(req)
     result = {
         "schema_version": "webactueel-transcription-result/1.0",
         "request_id": req["request_id"],
@@ -225,13 +268,15 @@ def write_collection_result(req):
         "metadata": metadata,
         "transformations": transformations,
         "tool_versions": runtime.tool_versions(),
+        "provenance": provenance,
         "source_context": req.get("source_context"),
         "limitations": [
             "Only public captions are collected; videos that expose no usable captions are recorded separately from access/tool failures.",
-            "Channel roots are scanned across public videos, Shorts and stream archives and deduplicated by video ID.",
+            "Channel roots are scanned across public videos, Shorts and stream archives and deduplicated by video ID; failed discovery targets remain explicit in metadata.",
+            "Known runner-wide source blocks fail fast and remaining discovered videos are marked not attempted rather than repeatedly queried.",
             "The result is review material and is not automatically promoted to project truth or a Skill.",
             "Public YouTube audio/video download and Whisper fallback remain disabled.",
-            "The runtime does not bypass login, cookies, DRM, paywalls, CAPTCHA, age controls, or private access.",
+            "The runtime does not bypass login, cookies, DRM, paywalls, CAPTCHA, age controls, private access or system proxies.",
         ],
     }
     source_register = {
@@ -239,6 +284,8 @@ def write_collection_result(req):
         "request_id": req["request_id"],
         "source_url": req["url"],
         "fetched_at": started,
+        "request_sha256": provenance["request_sha256"],
+        "repository_commit": provenance["repository_commit"],
         "sources": metadata["items"],
     }
     handoff = {
@@ -254,6 +301,8 @@ def write_collection_result(req):
         "content_available": content_available,
         "content_path": "content.md" if content_persisted else None,
         "source_register_path": "source-register.json",
+        "request_sha256": provenance["request_sha256"],
+        "repository_commit": provenance["repository_commit"],
         "source_items": metadata["items"],
         "next_action": (
             "Review, deduplicate and paraphrase accepted insights; route every accepted insight to exactly one "

@@ -3,15 +3,18 @@ import hashlib
 import ipaddress
 import json
 import os
+import platform
 import re
+import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urljoin, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 import trafilatura
 
@@ -22,6 +25,14 @@ ROOT = Path(os.environ.get("GITHUB_WORKSPACE", Path.cwd()))
 BIN = ROOT / "tools" / "bin"
 MODEL = ROOT / "tools" / "models" / "ggml-base.bin"
 RESULTS = ROOT / "results"
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 180
+MEDIA_METADATA_TIMEOUT_SECONDS = 90
+SUBTITLE_TIMEOUT_SECONDS = 180
+AUDIO_DOWNLOAD_TIMEOUT_SECONDS = 900
+WHISPER_TIMEOUT_SECONDS = 5400
+MAX_AUTHORIZED_AUDIO_DURATION_SECONDS = 7200
+MAX_AUTHORIZED_AUDIO_SOURCE_BYTES = 256 * 1024 * 1024
+MAX_AUTHORIZED_WAV_BYTES = 320 * 1024 * 1024
 
 
 class CaptionUnavailableError(RuntimeError):
@@ -40,6 +51,19 @@ def sha256_text(text):
     return sha256_bytes(text.encode("utf-8"))
 
 
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def canonical_request_sha256(req):
+    encoded = json.dumps(req, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return sha256_text(encoded)
+
+
 def validate_public_url(raw):
     parts = urlsplit(str(raw))
     if parts.scheme not in {"http", "https"} or not parts.hostname:
@@ -50,6 +74,8 @@ def validate_public_url(raw):
         if SECRET_KEY_RE.search(key):
             raise ValueError(f"secret-like query parameter forbidden: {key}")
     infos = socket.getaddrinfo(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80), type=socket.SOCK_STREAM)
+    if not infos:
+        raise ValueError("hostname did not resolve")
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
         if any((ip.is_private, ip.is_loopback, ip.is_link_local, ip.is_multicast, ip.is_reserved, ip.is_unspecified)):
@@ -65,7 +91,7 @@ class SafeRedirects(HTTPRedirectHandler):
 
 def fetch_public(url, max_bytes=10_000_000):
     validate_public_url(url)
-    opener = build_opener(SafeRedirects())
+    opener = build_opener(ProxyHandler({}), SafeRedirects())
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xml,text/xml,application/rss+xml,application/atom+xml,*/*;q=0.5"})
     with opener.open(request, timeout=25) as response:
         validate_public_url(response.geturl())
@@ -75,22 +101,78 @@ def fetch_public(url, max_bytes=10_000_000):
         return data, response.geturl(), response.headers.get("content-type", "")
 
 
-def run(command, *, cwd=None, check=True):
-    completed = subprocess.run(command, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+def _timeout_output(value):
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def run(command, *, cwd=None, check=True, timeout=DEFAULT_COMMAND_TIMEOUT_SECONDS):
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = _timeout_output(exc.stdout)
+        stderr = _timeout_output(exc.stderr)
+        detail = f"command timed out after {timeout}s"
+        if check:
+            raise RuntimeError(f"{detail}: {' '.join(map(str, command[:3]))}: {stderr[-2000:]}") from exc
+        return subprocess.CompletedProcess(command, 124, stdout, (stderr + "\n" + detail).strip())
     if check and completed.returncode != 0:
         stderr = completed.stderr[-4000:]
         raise RuntimeError(f"command failed ({completed.returncode}): {' '.join(map(str, command[:3]))}: {stderr}")
     return completed
 
 
+def _existing_digest(path):
+    if not path:
+        return None
+    candidate = Path(path)
+    return sha256_file(candidate) if candidate.is_file() else None
+
+
+def tool_digests():
+    candidates = {
+        "yt-dlp": BIN / "yt-dlp.bin",
+        "deno": BIN / "deno",
+        "ffmpeg": shutil.which("ffmpeg"),
+        "ffprobe": shutil.which("ffprobe"),
+        "whisper.cpp": BIN / "whisper-cli",
+        "whisper_model": MODEL,
+    }
+    return {name: digest for name, path in candidates.items() if (digest := _existing_digest(path))}
+
+
 def tool_versions():
     return {
         "trafilatura": getattr(trafilatura, "__version__", "2.1.0"),
-        "yt-dlp": run([str(BIN / "yt-dlp"), "--version"]).stdout.strip(),
-        "ffmpeg": run(["ffmpeg", "-version"]).stdout.splitlines()[0].strip(),
-        "ffprobe": run(["ffprobe", "-version"]).stdout.splitlines()[0].strip(),
+        "yt-dlp": run([str(BIN / "yt-dlp"), "--version"], timeout=30).stdout.strip(),
+        "ffmpeg": run(["ffmpeg", "-version"], timeout=30).stdout.splitlines()[0].strip(),
+        "ffprobe": run(["ffprobe", "-version"], timeout=30).stdout.splitlines()[0].strip(),
         "whisper.cpp": "v1.9.2" if (BIN / "whisper-cli").exists() else "not-installed",
-        "whisper_model": "base@5359861c739e955e79d9a303bcbc70fb988958b1" if MODEL.exists() else "not-installed"
+        "whisper_model": "base@5359861c739e955e79d9a303bcbc70fb988958b1" if MODEL.exists() else "not-installed",
+    }
+
+
+def runtime_provenance(req):
+    return {
+        "request_sha256": canonical_request_sha256(req),
+        "repository_commit": os.environ.get("GITHUB_SHA", "local"),
+        "github_run_id": os.environ.get("GITHUB_RUN_ID"),
+        "github_ref": os.environ.get("GITHUB_REF"),
+        "python_version": platform.python_version(),
+        "python_implementation": platform.python_implementation(),
+        "platform": platform.platform(),
+        "tool_sha256": tool_digests(),
     }
 
 
@@ -111,12 +193,16 @@ def normalize_subtitles(path):
 
 
 def yt_base():
-    return [str(BIN / "yt-dlp"), "--no-config", "--no-cookies", "--no-playlist", "--no-warnings"]
+    return [
+        str(BIN / "yt-dlp"),
+        "--no-config", "--no-cookies", "--no-playlist", "--no-warnings",
+        "--proxy", "", "--socket-timeout", "30", "--retries", "3", "--extractor-retries", "3",
+    ]
 
 
 def detect_media(url):
     cmd = yt_base() + ["--simulate", "--dump-single-json", url]
-    completed = run(cmd, check=False)
+    completed = run(cmd, check=False, timeout=MEDIA_METADATA_TIMEOUT_SECONDS)
     if completed.returncode != 0 or not completed.stdout.strip():
         return None
     try:
@@ -130,7 +216,7 @@ def detect_media(url):
         "extractor": meta.get("extractor_key") or meta.get("extractor"),
         "duration": meta.get("duration"),
         "webpage_url": final,
-        "id": meta.get("id")
+        "id": meta.get("id"),
     }
 
 
@@ -151,9 +237,9 @@ def media_content(req, media_meta=None):
         subtitle_cmd = yt_base() + [
             "--write-subs", "--write-auto-subs", "--sub-langs", lang_selector,
             "--sub-format", "srt/vtt/best", "--skip-download",
-            "-o", str(tmp / "source.%(ext)s"), req["url"]
+            "-o", str(tmp / "source.%(ext)s"), req["url"],
         ]
-        subtitle_run = run(subtitle_cmd, check=False)
+        subtitle_run = run(subtitle_cmd, check=False, timeout=SUBTITLE_TIMEOUT_SECONDS)
         subtitle_files = sorted([*tmp.glob("source*.srt"), *tmp.glob("source*.vtt")])
         for subtitle_file in subtitle_files:
             text = normalize_subtitles(subtitle_file)
@@ -161,7 +247,7 @@ def media_content(req, media_meta=None):
                 return text, "subtitle", {
                     "media": media_meta,
                     "subtitle_file_type": subtitle_file.suffix.lstrip("."),
-                    "subtitle_command_exit": subtitle_run.returncode
+                    "subtitle_command_exit": subtitle_run.returncode,
                 }, ["yt-dlp:public-subtitles", "normalize:subtitle-lines"]
 
         if is_public_youtube(req["url"], media_meta):
@@ -177,36 +263,53 @@ def media_content(req, media_meta=None):
             raise RuntimeError("no usable public subtitles found and allow_audio_fallback=false")
         if not req.get("audio_access_authorized"):
             raise RuntimeError("audio fallback requires explicit audio_access_authorized=true")
+        duration = (media_meta or {}).get("duration")
+        if not isinstance(duration, (int, float)) or duration <= 0:
+            raise RuntimeError("authorized audio fallback requires positive media duration metadata")
+        if duration > MAX_AUTHORIZED_AUDIO_DURATION_SECONDS:
+            raise RuntimeError(
+                f"authorized audio duration exceeds {MAX_AUTHORIZED_AUDIO_DURATION_SECONDS}s safety limit"
+            )
         if not (BIN / "whisper-cli").exists() or not MODEL.exists():
             raise RuntimeError("whisper.cpp runtime/model not installed")
 
         audio_cmd = yt_base() + [
-            "-f", "bestaudio/best", "-x", "--audio-format", "wav",
+            "-f", "bestaudio/best", "--max-filesize", "256M", "-x", "--audio-format", "wav",
             "--postprocessor-args", "ffmpeg:-ar 16000 -ac 1",
-            "-o", str(tmp / "audio.%(ext)s"), req["url"]
+            "-o", str(tmp / "audio.%(ext)s"), req["url"],
         ]
-        run(audio_cmd)
+        run(audio_cmd, timeout=AUDIO_DOWNLOAD_TIMEOUT_SECONDS)
         audio_files = sorted(tmp.glob("audio*.wav"))
         if not audio_files:
             raise RuntimeError("yt-dlp/ffmpeg produced no WAV")
         audio = audio_files[0]
+        if audio.stat().st_size > MAX_AUTHORIZED_WAV_BYTES:
+            raise RuntimeError(f"normalized WAV exceeds {MAX_AUTHORIZED_WAV_BYTES} byte safety limit")
         prefix = tmp / "whisper"
-        whisper_cmd = [str(BIN / "whisper-cli"), "-m", str(MODEL), "-f", str(audio), "-l", language, "-otxt", "-of", str(prefix)]
-        completed = run(whisper_cmd)
+        whisper_cmd = [
+            str(BIN / "whisper-cli"), "-m", str(MODEL), "-f", str(audio),
+            "-l", language, "-otxt", "-of", str(prefix),
+        ]
+        completed = run(whisper_cmd, timeout=WHISPER_TIMEOUT_SECONDS)
         transcript_path = Path(f"{prefix}.txt")
         text = transcript_path.read_text(encoding="utf-8", errors="replace").strip() if transcript_path.exists() else completed.stdout.strip()
         if not text:
             raise RuntimeError("whisper.cpp produced empty transcript")
         return text, "whisper", {
             "media": media_meta,
-            "audio_sha256": sha256_bytes(audio.read_bytes()),
+            "audio_sha256": sha256_file(audio),
             "audio_bytes": audio.stat().st_size,
-            "model_sha256": sha256_bytes(MODEL.read_bytes()),
-            "audio_access_authorized": True
+            "model_sha256": sha256_file(MODEL),
+            "audio_access_authorized": True,
+            "audio_duration_limit_seconds": MAX_AUTHORIZED_AUDIO_DURATION_SECONDS,
+            "audio_source_limit_bytes": MAX_AUTHORIZED_AUDIO_SOURCE_BYTES,
         }, ["yt-dlp:authorized-audio", "ffmpeg:16khz-mono-wav", "whisper.cpp:base"]
 
 
 def parse_xml_links(data, base_url, mode):
+    upper = data.upper()
+    if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+        raise ValueError("XML DTD/entity declarations are forbidden")
     root = ET.fromstring(data)
     links = []
     if mode == "sitemap" or root.tag.lower().endswith("sitemapindex") or root.tag.lower().endswith("urlset"):
@@ -292,16 +395,20 @@ def main():
         "metadata": metadata,
         "transformations": transformations,
         "tool_versions": tool_versions(),
+        "provenance": runtime_provenance(req),
         "source_context": req.get("source_context"),
         "limitations": [
             "Transcriptie en extractie kunnen inhoudelijke fouten bevatten en vereisen bronvergelijking voor belangrijke claims.",
             "controlled_runtime output is geen automatische projectwaarheid.",
             "Publieke YouTube-bronnen zijn uitsluitend captions/metadata; audio/video-download en Whisper-fallback zijn daar geblokkeerd.",
-            "De runtime omzeilt geen login, cookies, DRM of paywalls."
-        ]
+            "De runtime omzeilt geen login, cookies, DRM, paywalls of systeemproxy's.",
+        ],
     }
+    content_path = RESULTS / "content.md"
     if req.get("reuse_allowed"):
-        (RESULTS / "content.md").write_text(normalized, encoding="utf-8")
+        content_path.write_text(normalized, encoding="utf-8")
+    elif content_path.exists():
+        content_path.unlink()
     (RESULTS / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (RESULTS / "tool-versions.txt").write_text("\n".join(f"{key}={value}" for key, value in result["tool_versions"].items()) + "\n", encoding="utf-8")
     print(json.dumps({"request_id": req["request_id"], "mode": detected_mode, "content_sha256": result["content_sha256"], "content_persisted": result["content_persisted"]}))
