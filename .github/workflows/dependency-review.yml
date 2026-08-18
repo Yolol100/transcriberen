@@ -22,10 +22,18 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Review introduced dependency changes
+      - name: Review introduced dependency changes when GitHub Dependency graph is available
+        id: native_dependency_review
+        continue-on-error: true
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
+      - name: Record native Dependency Review capability gap
+        if: steps.native_dependency_review.outcome == 'failure'
+        shell: bash
+        run: |
+          echo 'GitHub native Dependency Review is unavailable until the repository Dependency graph is enabled.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The exact-hash lock audit and pip-audit remain enforcing fallbacks; native dependency-diff review is an external repository-admin gate.' >> "$GITHUB_STEP_SUMMARY"
 
   pip-audit:
     runs-on: ubuntu-24.04
