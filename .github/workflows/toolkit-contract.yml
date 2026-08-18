@@ -6,40 +6,53 @@ on:
     branches: [main]
     paths:
       - 'toolkit-contract.json'
+      - 'requirements.in'
       - 'requirements.txt'
+      - 'requirements.lock'
       - 'scripts/**'
       - 'tests/**'
       - '.github/workflows/**'
+      - '.github/dependabot.yml'
 
 permissions:
   contents: read
 
+concurrency:
+  group: toolkit-contract-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
 
-      - name: Install locked Python extraction dependency
-        run: python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+      - name: Install verified Python extraction dependencies
+        run: bash scripts/install_python_deps.sh
 
       - name: Validate code and request safety regressions
+        shell: bash
         run: |
+          set -euo pipefail
           python -m py_compile scripts/*.py tests/*.py
-          bash -n scripts/install_tools.sh
+          bash -n scripts/install_tools.sh scripts/install_python_deps.sh
           python -m unittest discover -s tests -v
 
-      - name: Validate registered toolkit is accountless and wired
+      - name: Validate registered toolkit, lock and accountless boundaries
         run: |
           python - <<'PY'
           import json
           import pathlib
+          import re
 
           contract = json.load(open('toolkit-contract.json', encoding='utf-8'))
           assert contract['schema_version'] == '1.1'
@@ -62,14 +75,52 @@ jobs:
               covered.add(assertion['tool'])
           assert covered == set(ids), f'unwired tools: {set(ids) - covered}'
 
+          direct = [line.strip() for line in pathlib.Path('requirements.in').read_text(encoding='utf-8').splitlines() if line.strip() and not line.lstrip().startswith('#')]
+          assert direct == ['trafilatura==2.1.0'], direct
+          assert pathlib.Path('requirements.txt').read_text(encoding='utf-8').strip() == '-r requirements.lock'
+          lock_lines = [line.strip() for line in pathlib.Path('requirements.lock').read_text(encoding='utf-8').splitlines() if line.strip() and not line.lstrip().startswith('#')]
+          assert lock_lines, 'empty requirements.lock'
+          pattern = re.compile(r'^[a-z0-9][a-z0-9._-]*==[^ ]+ --hash=sha256:[0-9a-f]{64}  # [^ ]+\.whl$')
+          assert all(pattern.fullmatch(line) for line in lock_lines), 'invalid lock line'
+          locked_names = [line.split('==', 1)[0] for line in lock_lines]
+          assert len(locked_names) == len(set(locked_names)), 'duplicate package in requirements.lock'
+          assert any(line.startswith('trafilatura==2.1.0 --hash=sha256:0eded5207a806445ddebbe36eae30b9035fe6a2f233c36f6fe82663fca8b9d30') for line in lock_lines)
+
           workflow = pathlib.Path('.github/workflows/transcribe.yml').read_text(encoding='utf-8')
-          assert 'actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131' in workflow
+          assert 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' in workflow
+          assert 'actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97' in workflow
+          assert 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' in workflow
+          assert 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' in workflow
+          assert 'persist-credentials: false' in workflow
+          assert 'bash scripts/install_python_deps.sh' in workflow
           assert 'youtube_scope' in workflow
           assert 'youtube_include_comments' in workflow
-          assert 'sudo apt-get install -y --no-install-recommends ffmpeg' in workflow
-          assert 'ffmpeg -version | head -n 1' in workflow
-          assert 'ffprobe -version | head -n 1' in workflow
+          assert 'youtube_sort_by' in workflow and 'random' in workflow
+          assert 'source_set_version' in workflow
           assert 'actions/setup-node' not in workflow
+
+          python_deps = pathlib.Path('scripts/install_python_deps.sh').read_text(encoding='utf-8')
+          assert '--isolated install' in python_deps
+          assert '--require-hashes' in python_deps
+          assert '--only-binary=:all:' in python_deps
+          assert 'requirements.lock' in python_deps
+
+          dependency_audit = pathlib.Path('.github/workflows/dependency-review.yml').read_text(encoding='utf-8')
+          assert 'pypa/gh-action-pip-audit@1220774d901786e6f652ae159f7b6bc8fea6d266' in dependency_audit
+          assert 'inputs: requirements.lock' in dependency_audit
+          assert 'require-hashes: true' in dependency_audit
+          assert 'no-deps: true' in dependency_audit
+
+          codeql = pathlib.Path('.github/workflows/codeql.yml').read_text(encoding='utf-8')
+          assert codeql.count('github/codeql-action/') == 2
+          assert codeql.count('@f205ea1c3313d32999d8d6a48b4f6530d4437b38') == 2
+          assert 'validate_codeql_sarif.py' in codeql
+          assert 'language: [python, actions]' in codeql
+
+          lock_audit = pathlib.Path('.github/workflows/lock-audit.yml').read_text(encoding='utf-8')
+          assert '-r requirements.in' in lock_audit
+          assert '--only-binary=:all:' in lock_audit
+          assert 'diff -u requirements.lock requirements.generated.lock' in lock_audit
 
           youtube_runtime = pathlib.Path('scripts/youtube_runtime.py').read_text(encoding='utf-8')
           assert '"--skip-download"' in youtube_runtime
@@ -83,17 +134,21 @@ jobs:
           installer = pathlib.Path('scripts/install_tools.sh').read_text(encoding='utf-8')
           assert 'DENO_VERSION="v2.9.5"' in installer
           assert 'DENO_SHA256="8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530"' in installer
+          assert 'YT_DLP_VERSION="2026.07.04"' in installer
+          assert 'YT_DLP_SHA256="495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd"' in installer
           assert '--js-runtimes "deno:$HERE/deno"' in installer
           assert '--remote-components' not in installer
           print('toolkit-contract: OK')
           PY
 
       - name: Verify pinned yt-dlp binary and local Deno route
+        shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           bash scripts/install_tools.sh false
-          tools/bin/yt-dlp --version | grep -Fx '2026.07.04'
-          tools/bin/deno --version | head -n 1 | grep -F 'deno 2.9.5'
+          test "$(tools/bin/yt-dlp --version)" = '2026.07.04'
+          tools/bin/deno --version > /tmp/deno-version.txt
+          grep -F 'deno 2.9.5' /tmp/deno-version.txt
 
       - name: Verify Trafilatura runtime
-        run: python -c "import trafilatura; print(getattr(trafilatura, '__version__', 'unknown'))"
+        run: python -c "import trafilatura; assert trafilatura.__version__ == '2.1.0'; print(trafilatura.__version__)"

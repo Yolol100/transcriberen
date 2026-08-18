@@ -27,3 +27,5 @@ jobs:
         with:
           inputs: requirements.lock
           vulnerability-service: PyPI
+          require-hashes: true
+          no-deps: true

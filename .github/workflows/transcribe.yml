@@ -130,6 +130,7 @@ permissions:
 jobs:
   resolve:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       run: ${{ steps.resolve.outputs.run }}
       request_id: ${{ steps.resolve.outputs.request_id }}
@@ -139,6 +140,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Resolve and validate request
         id: resolve
         env:
@@ -168,9 +172,10 @@ jobs:
           INPUT_RIGHTS_BASIS: ${{ inputs.rights_basis }}
           INPUT_SOURCE_SET_VERSION: ${{ inputs.source_set_version }}
         run: python3 scripts/resolve_request.py
+
       - name: Upload resolved request for runtime job
         if: steps.resolve.outputs.run == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: resolved-transcription-request
           path: resolved-request.json
@@ -185,26 +190,33 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
 
       - name: Download resolved request
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: resolved-transcription-request
 
-      - name: Install locked Python extraction dependency
-        run: python -m pip install --disable-pip-version-check --no-input -r requirements.txt
+      - name: Install verified Python extraction dependencies
+        run: bash scripts/install_python_deps.sh
 
       - name: Install FFmpeg runtime
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
-          ffmpeg -version | head -n 1
-          ffprobe -version | head -n 1
+          set -euo pipefail
+          APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          timeout 300s sudo apt-get "${APT_OPTS[@]}" update
+          timeout 300s sudo apt-get "${APT_OPTS[@]}" install -y --no-install-recommends ffmpeg
+          command -v ffmpeg
+          command -v ffprobe
+          ffmpeg -version
+          ffprobe -version
 
       - name: Install pinned local media/transcription tools
         run: bash scripts/install_tools.sh '${{ needs.resolve.outputs.install_whisper }}'
@@ -234,7 +246,7 @@ jobs:
 
       - name: Upload normalized result
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: transcription-result-${{ needs.resolve.outputs.request_id }}
           path: results/
