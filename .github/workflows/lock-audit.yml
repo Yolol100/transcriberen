@@ -4,13 +4,24 @@ on:
   pull_request:
     paths:
       - 'requirements.txt'
+      - 'requirements.lock'
+      - '.github/workflows/lock-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'requirements.txt'
+      - 'requirements.lock'
       - '.github/workflows/lock-audit.yml'
 
 permissions:
   contents: read
 
+concurrency:
+  group: dependency-lock-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  generate-lock:
+  verify-lock:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -24,19 +35,22 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Resolve and validate exact wheel set
+      - name: Resolve, hash and compare exact wheel set
         env:
-          PIP_INDEX_URL: https://pypi.org/simple
           PIP_DISABLE_PIP_VERSION_CHECK: '1'
         run: |
           set -euo pipefail
-          python -m pip install --no-input pip-tools
-          pip-compile --generate-hashes --resolver=backtracking --strip-extras --output-file requirements.full.lock requirements.txt
+          rm -rf wheels requirements.generated.lock
           mkdir -p wheels
-          python -m pip download --require-hashes --only-binary=:all: --dest wheels -r requirements.full.lock
+          python -m pip --isolated download \
+            --disable-pip-version-check \
+            --no-input \
+            --index-url https://pypi.org/simple \
+            --only-binary=:all: \
+            --dest wheels \
+            -r requirements.txt
           python - <<'PY'
           import hashlib
-          import platform
           from pathlib import Path
           from packaging.utils import canonicalize_name, parse_wheel_filename
 
@@ -52,20 +66,28 @@ jobs:
           lines = [
               '# Fully pinned wheel lock for the production GitHub runtime.',
               '# Generated from requirements.txt on ubuntu-24.04 / Python 3.12 / x86_64.',
-              f'# Generator Python: {platform.python_version()}',
-              '# Regenerate through the audited lock workflow when requirements change.',
+              '# Resolver: pip from the pinned setup-python runtime; wheel bytes are SHA-256 locked.',
+              '# Regenerate through .github/workflows/lock-audit.yml when requirements change.',
               '',
           ]
           for name, version, digest, wheel_name in sorted(rows):
               lines.append(f'{name}=={version} --hash=sha256:{digest}  # {wheel_name}')
-          Path('requirements.lock').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          Path('requirements.generated.lock').write_text('\n'.join(lines) + '\n', encoding='utf-8')
           PY
-          python -m pip install --dry-run --no-index --find-links wheels --require-hashes --only-binary=:all: -r requirements.lock
+          python -m pip --isolated install \
+            --dry-run \
+            --no-index \
+            --find-links wheels \
+            --require-hashes \
+            --only-binary=:all: \
+            -r requirements.generated.lock
+          diff -u requirements.lock requirements.generated.lock
 
-      - name: Upload compact lock candidate
+      - name: Upload generated lock evidence
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: requirements-lock-candidate
-          path: requirements.lock
-          retention-days: 1
-          if-no-files-found: error
+          name: requirements-lock-evidence-${{ github.run_id }}
+          path: requirements.generated.lock
+          retention-days: 7
+          if-no-files-found: warn

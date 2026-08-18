@@ -23,7 +23,7 @@
     {"tool":"ffmpeg","path":"scripts/runtime.py","contains":"ffmpeg"},
     {"tool":"whisper.cpp","path":"scripts/install_tools.sh","contains":"WHISPER_SHA256"},
     {"tool":"whisper-base-model","path":"scripts/install_tools.sh","contains":"WHISPER_MODEL_SHA256"},
-    {"tool":"trafilatura","path":"scripts/install_python_deps.sh","contains":"TRAFILATURA_WHEEL_SHA256"},
+    {"tool":"trafilatura","path":"requirements.lock","contains":"trafilatura==2.1.0 --hash=sha256:0eded5207a806445ddebbe36eae30b9035fe6a2f233c36f6fe82663fca8b9d30"},
     {"tool":"python-source-parser","path":"scripts/runtime.py","contains":"xml.etree.ElementTree"}
   ],
   "boundaries": [
@@ -33,13 +33,14 @@
     "Known runner-wide YouTube bot/rate-limit blocks fail fast: the first access error is recorded and remaining discovered videos are marked not attempted instead of repeatedly hammering the same blocked route.",
     "Shared cloud IPs can receive upstream YouTube LOGIN_REQUIRED/bot challenges before captions are exposed; caption access failures are reported separately from confirmed missing captions and never bypassed with hidden cookies, proxy, account or external transcript fallback.",
     "Non-YouTube Whisper fallback requires allow_audio_fallback=true, audio_access_authorized=true, a concrete authorization/rights_basis, positive duration metadata and the configured duration/file/time safety limits.",
-    "Release-critical downloaded runtimes and the direct Trafilatura wheel are version-pinned and verified against reviewed SHA-256 values before promotion or installation.",
+    "The complete Python wheel dependency set for Ubuntu 24.04 / Python 3.12 / x86_64 is version-pinned and SHA-256 locked; production pip runs isolated with --require-hashes and binary-only packages.",
+    "Release-critical downloaded runtimes are version-pinned and verified against reviewed SHA-256 values before promotion or installation.",
     "Runtime results bind the canonical resolved request, executed GitHub commit, platform and actual runtime binary digests through a provenance block that the validator rechecks.",
     "Persisted content is re-hashed and length-checked by the result validator; raw source content is never automatically project truth or automatically written to a Skill.",
     "Content is persisted only when reuse_allowed=true and usable extracted content exists; provenance, metadata and hashes may persist without content.",
     "XML DTD/entity declarations are rejected before ElementTree parsing; public HTTP fetches remain byte-bounded.",
     "Audio media and model files are temporary runtime inputs and are never committed to Git.",
-    "Repository CI includes unit/negative tests, ShellCheck, PyPA pip-audit, CodeQL and Dependabot maintenance; external YouTube reachability is monitored separately and is not a false merge guarantee.",
+    "Repository CI includes unit/negative tests, ShellCheck, a deterministic dependency-lock comparison, PyPA pip-audit, CodeQL with a blocking high/critical SARIF gate, Dependabot maintenance and an external YouTube availability probe.",
     "All output is at most controlled_runtime evidence and remains subject to Webactueel-workflow source quality, rights, deduplication, currentness and controlled-write gates."
   ]
 }

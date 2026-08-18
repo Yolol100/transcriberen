@@ -44,8 +44,9 @@ Zie `docs/youtube-collections.md` voor statussen en de availability probe.
 - Deno 2.9.5 als gepinde lokale EJS-runtime met vaste SHA-256.
 - FFmpeg/ffprobe uit de GitHub-hosted Ubuntu runtime; daadwerkelijke versies én runtime-binarydigests worden in provenance vastgelegd.
 - `whisper.cpp` v1.9.2 plus gepind `base` model alleen voor geautoriseerde niet-YouTube-audiofallback.
-- Trafilatura 2.1.0; de directe universele wheel wordt vóór installatie tegen de geregistreerde PyPI SHA-256 gecontroleerd.
-- Gedownloade tools worden eerst in een unieke tijdelijke stagingmap gevalideerd en pas daarna naar hun runtimepad geïnstalleerd.
+- De volledige Python dependencyboom voor Ubuntu 24.04 / Python 3.12 / x86_64 staat in `requirements.lock`: iedere gekozen wheel is exact gepind en SHA-256 vastgelegd. Productie-pip draait geïsoleerd met `--require-hashes --only-binary=:all:`.
+- `requirements.txt` blijft de minimale directe intentie; de read-only Dependency Lock Audit resolveert exact dezelfde wheelset, valideert die offline en vergelijkt hem byte-inhoudelijk met het gecommitte lock.
+- Gedownloade media-/transcriptietools worden eerst in een unieke tijdelijke stagingmap gevalideerd en pas daarna naar hun runtimepad geïnstalleerd.
 - GitHub Actions zijn op volledige commit-SHA vastgezet; Dependabot onderhoudt pip- en Actions-updates.
 
 `bgutil-ytdlp-pot-provider` en `youtube-transcript-api` zijn bewust geen vaste dependencies. De lokale bgutil/Deno-provider is live getest maar hief de GitHub-hosted YouTube-botchallenge niet op; transcript-API-routes lossen dezelfde cloud-IP-afhankelijkheid niet betrouwbaar op zonder infrastructuur die buiten de repo-eisen valt.
@@ -92,9 +93,10 @@ PR's worden technisch getoetst met:
 - unit- en negatieve regressietests;
 - Python syntaxcheck en ShellCheck;
 - toolkit-/policycontract;
+- volledig gehashte Python dependency-lock + lock-driftcheck;
 - installatie en verificatie van de gepinde media-toolchain;
-- PyPA `pip-audit` op de volledige Python dependencyresolutie;
-- CodeQL voor Python én GitHub Actions-workflows;
+- PyPA `pip-audit` op de volledig gepinde Python dependencyboom;
+- CodeQL voor Python én GitHub Actions-workflows, met een fail-closed gate voor security-severity `>= 7.0`;
 - een niet-blokkerende YouTube Availability Probe die externe runner-bereikbaarheid apart registreert;
 - Dependabot voor periodiek dependency-/Actiononderhoud.
 
