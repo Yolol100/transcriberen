@@ -34,6 +34,19 @@ class RuntimePolicyTests(unittest.TestCase):
     def test_generic_single_media_base_stays_no_playlist(self):
         self.assertIn("--no-playlist", runtime.yt_base())
 
+    def test_generic_base_omits_removed_no_netrc_option(self):
+        cmd = runtime.yt_base()
+        self.assertNotIn("--no-netrc", cmd)
+        self.assertIn("--no-config", cmd)
+        self.assertIn("--no-cookies", cmd)
+
+    def test_youtube_base_omits_removed_no_netrc_option(self):
+        cmd = runtime.youtube_runtime.yt_base()
+        self.assertNotIn("--no-netrc", cmd)
+        self.assertIn("--no-config", cmd)
+        self.assertIn("--no-cookies", cmd)
+        self.assertIn("--skip-download", cmd)
+
 
 if __name__ == "__main__":
     unittest.main()
