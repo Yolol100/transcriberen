@@ -97,7 +97,7 @@ if result.get("detected_mode") == "youtube":
                 errors.append("youtube count ordering")
             if counts["selected_count"] != counts["item_count"] or counts["item_count"] != len(items):
                 errors.append("youtube item count mismatch")
-        if index.get("collection_status") not in {"empty", "no_usable_captions", "partial", "ok"}:
+        if index.get("collection_status") not in {"empty", "no_usable_captions", "partial", "ok", "access_blocked", "failed"}:
             errors.append("youtube collection_status")
         if index.get("include_comments") and index.get("comment_identity_minimized") is not True:
             errors.append("youtube comment identity minimization")
