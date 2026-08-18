@@ -84,6 +84,11 @@ jobs:
           assert 'persist-credentials: false' in workflow
           assert 'actions/setup-node' not in workflow
 
+          codeql = pathlib.Path('.github/workflows/codeql.yml').read_text(encoding='utf-8')
+          assert 'github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81' in codeql
+          assert 'github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81' in codeql
+          assert 'validate_codeql_sarif.py' in codeql
+
           installer = pathlib.Path('scripts/install_tools.sh').read_text(encoding='utf-8')
           assert 'DENO_VERSION="v2.9.5"' in installer
           assert 'DENO_SHA256="8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530"' in installer

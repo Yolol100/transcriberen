@@ -40,3 +40,7 @@ jobs:
         uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           category: '/language:${{ matrix.language }}'
+          output: ../results
+
+      - name: Enforce no high or critical CodeQL findings
+        run: python scripts/validate_codeql_sarif.py "../results/${{ matrix.language }}.sarif"
