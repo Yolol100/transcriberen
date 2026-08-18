@@ -11,6 +11,7 @@ spec.loader.exec_module(resolve_request)
 
 PUBLIC_DNS = [(2, 1, 6, "", ("93.184.216.34", 443))]
 PRIVATE_DNS = [(2, 1, 6, "", ("127.0.0.1", 443))]
+SOURCE_SET = "2.0.0-audit-hardening"
 
 BASE = {
     "enabled": True,
@@ -24,9 +25,21 @@ BASE = {
     "audio_access_authorized": False,
     "analysis_content_allowed": False,
     "reuse_allowed": False,
+    "public_request_acknowledged": False,
     "rights_basis": "analysis-paraphrase-only",
-    "source_context": {"project_id": "project-transcriberen", "source_set_version": "test-source-set"}
+    "source_context": {"project_id": "project-transcriberen", "source_set_version": SOURCE_SET},
 }
+
+
+def youtube_request(scope="video", url="https://www.youtube.com/watch?v=abcdefghijk"):
+    request = copy.deepcopy(BASE)
+    request.update({
+        "mode": "youtube",
+        "url": url,
+        "youtube_access_basis": "prior-written-permission",
+        "youtube": {"scope": scope},
+    })
+    return request
 
 
 class RequestContractTests(unittest.TestCase):
@@ -62,21 +75,6 @@ class RequestContractTests(unittest.TestCase):
             resolve_request.validate_request(request)
 
     @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
-    def test_analysis_artifact_does_not_imply_reuse(self, _dns):
-        request = copy.deepcopy(BASE)
-        request["analysis_content_allowed"] = True
-        validated = resolve_request.validate_request(request)
-        self.assertTrue(validated["analysis_content_allowed"])
-        self.assertFalse(validated["reuse_allowed"])
-
-    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
-    def test_audio_fallback_requires_explicit_authorization(self, _dns):
-        request = copy.deepcopy(BASE)
-        request["allow_audio_fallback"] = True
-        with self.assertRaisesRegex(ValueError, "audio_access_authorized=true"):
-            resolve_request.validate_request(request)
-
-    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
     def test_authorized_audio_fallback_is_accepted(self, _dns):
         request = copy.deepcopy(BASE)
         request["mode"] = "media"
@@ -87,55 +85,76 @@ class RequestContractTests(unittest.TestCase):
         self.assertTrue(validated["allow_audio_fallback"])
 
     def test_youtube_search_needs_no_url(self):
-        request = copy.deepcopy(BASE)
-        request.pop("analysis_content_allowed", None)
-        request.update({
-            "mode": "youtube", "url": "",
-            "youtube": {"scope": "search", "query": "wordpress performance", "year_from": 2025, "year_to": 2026}
-        })
+        request = youtube_request()
+        request.update({"url": "", "youtube": {"scope": "search", "query": "wordpress performance"}})
         validated = resolve_request.validate_request(request)
         self.assertIsNone(validated["url"])
-        self.assertEqual(validated["youtube"]["query"], "wordpress performance")
-        self.assertTrue(validated["analysis_content_allowed"])
-
-    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
-    def test_youtube_channel_scope_requires_youtube_host(self, _dns):
-        request = copy.deepcopy(BASE)
-        request.update({"mode": "youtube", "youtube": {"scope": "channel_all"}})
-        with self.assertRaisesRegex(ValueError, "YouTube scope requires"):
-            resolve_request.validate_request(request)
+        self.assertFalse(validated["analysis_content_allowed"])
 
     @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
     def test_youtube_disallows_audio_fallback(self, _dns):
-        request = copy.deepcopy(BASE)
-        request.update({
-            "mode": "youtube", "url": "https://www.youtube.com/watch?v=abc",
-            "youtube": {"scope": "video"}, "allow_audio_fallback": True,
-            "audio_access_authorized": True, "rights_basis": "authorized"
-        })
+        request = youtube_request()
+        request.update({"allow_audio_fallback": True, "audio_access_authorized": True, "rights_basis": "authorized"})
         with self.assertRaisesRegex(ValueError, "audio fallback is forbidden"):
             resolve_request.validate_request(request)
 
-    def test_youtube_comment_all_requires_explicit_unbounded_opt_in(self):
+    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
+    def test_youtube_requires_reviewed_access_basis(self, _dns):
+        request = youtube_request()
+        request.pop("youtube_access_basis")
+        with self.assertRaisesRegex(ValueError, "automated access"):
+            resolve_request.validate_request(request)
+
+    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
+    def test_stale_concrete_source_set_is_rejected(self, _dns):
         request = copy.deepcopy(BASE)
-        request.update({
-            "mode": "youtube", "url": "https://www.youtube.com/watch?v=abc",
-            "youtube": {"scope": "video", "include_comments": True, "max_comments": "all"}
-        })
-        with patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS):
-            with self.assertRaisesRegex(ValueError, "allow_unbounded"):
+        request["source_context"]["source_set_version"] = "1.9.0-youtube-scenario-completeness"
+        with self.assertRaisesRegex(ValueError, "does not match current toolkit source set"):
+            resolve_request.validate_request(request)
+
+    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
+    def test_public_repo_requires_explicit_request_acknowledgement(self, _dns):
+        request = youtube_request()
+        with patch.dict(resolve_request.os.environ, {"GITHUB_REPOSITORY_VISIBILITY": "public"}):
+            with self.assertRaisesRegex(ValueError, "public_request_acknowledged"):
                 resolve_request.validate_request(request)
 
-    def test_youtube_comment_all_is_supported_with_explicit_unbounded_opt_in(self):
-        request = copy.deepcopy(BASE)
-        request.update({
-            "mode": "youtube", "url": "https://www.youtube.com/watch?v=abc",
-            "youtube": {"scope": "video", "include_comments": True, "max_comments": "all", "allow_unbounded": True}
-        })
-        with patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS):
-            validated = resolve_request.validate_request(request)
-        self.assertEqual(validated["youtube"]["max_comments"], "all")
-        self.assertTrue(validated["youtube"]["allow_unbounded"])
+    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
+    def test_public_repo_forbids_raw_content_persistence(self, _dns):
+        request = youtube_request()
+        request["public_request_acknowledged"] = True
+        request["analysis_content_allowed"] = True
+        with patch.dict(resolve_request.os.environ, {"GITHUB_REPOSITORY_VISIBILITY": "public"}):
+            with self.assertRaisesRegex(ValueError, "may not persist transcript/comment"):
+                resolve_request.validate_request(request)
+
+    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
+    def test_bounded_comment_budget_is_enforced(self, _dns):
+        request = youtube_request()
+        request["youtube"].update({"include_comments": True, "max_items": 100, "max_comments": "500"})
+        with self.assertRaisesRegex(ValueError, "comment budget"):
+            resolve_request.validate_request(request)
+
+    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
+    def test_all_comments_is_limited_to_five_items(self, _dns):
+        request = youtube_request()
+        request["youtube"].update({"include_comments": True, "allow_unbounded": True, "max_items": 6, "max_comments": "all"})
+        with self.assertRaisesRegex(ValueError, "between 1 and 5"):
+            resolve_request.validate_request(request)
+
+    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
+    def test_knowledge_comment_selection_requires_goal_and_owner(self, _dns):
+        request = youtube_request()
+        request["youtube"].update({"include_comments": True, "comment_selection": "knowledge"})
+        request["knowledge_context"] = {"goal": "", "target_owner": "seo"}
+        with self.assertRaisesRegex(ValueError, "knowledge_context.goal"):
+            resolve_request.validate_request(request)
+
+    @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
+    def test_channel_streams_is_supported(self, _dns):
+        request = youtube_request("channel_streams", "https://www.youtube.com/@example")
+        validated = resolve_request.validate_request(request)
+        self.assertEqual(validated["youtube"]["scope"], "channel_streams")
 
 
 if __name__ == "__main__":

@@ -1,10 +1,6 @@
 name: Transcribe Public Source
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'requests/transcribe.json'
   workflow_dispatch:
     inputs:
       url:
@@ -18,16 +14,16 @@ on:
         type: choice
         options: [auto, media, article, feed, sitemap, youtube]
       language:
-        description: 'Taalcode of auto; auto = Engels, Nederlands, daarna eerste overige track'
+        description: 'Taalcode of auto'
         required: true
         default: auto
         type: string
       youtube_scope:
-        description: 'video, short, search, playlist, channel_videos, channel_shorts of channel_all'
+        description: 'video, short, search, playlist, channel_videos, channel_shorts, channel_streams of channel_all'
         required: true
         default: video
         type: choice
-        options: [video, short, search, playlist, channel_videos, channel_shorts, channel_all]
+        options: [video, short, search, playlist, channel_videos, channel_shorts, channel_streams, channel_all]
       youtube_query:
         description: 'Zoekterm voor youtube_scope=search'
         required: false
@@ -39,89 +35,110 @@ on:
         type: choice
         options: [relevance, views, likes, comments, newest, random]
       youtube_max_items:
-        description: 'Max geselecteerde videos; 0 = alle items binnen de discovery-scan'
         required: true
         default: '20'
         type: string
       youtube_candidate_limit:
-        description: 'Search-kandidaatset (1..500) voor lokale filtering/ranking'
         required: true
         default: '100'
         type: string
       youtube_scan_limit:
-        description: 'Max te scannen playlist/kanaalitems (0 = onbeperkt; vereist allow_unbounded)'
         required: true
         default: '500'
         type: string
       youtube_allow_unbounded:
-        description: 'Expliciete opt-in voor scan_limit=0 en/of max_comments=all'
+        description: 'Expliciete opt-in voor grotere workloads'
         required: true
         default: false
         type: boolean
       youtube_year_from:
-        description: 'Optioneel eerste uploadjaar, bv. 2025'
         required: false
         type: string
       youtube_year_to:
-        description: 'Optioneel laatste uploadjaar, bv. 2026'
         required: false
         type: string
       youtube_min_views:
-        description: 'Optioneel minimum aantal views'
         required: false
         type: string
       youtube_min_likes:
-        description: 'Optioneel minimum aantal likes'
         required: false
         type: string
       youtube_min_comments:
-        description: 'Optioneel minimum aantal comments'
         required: false
         type: string
       youtube_include_comments:
-        description: 'Haal publieke comments op zonder media te downloaden'
         required: true
         default: false
         type: boolean
       youtube_comment_sort:
-        description: 'YouTube commentsortering'
         required: true
         default: top
         type: choice
         options: [top, new]
       youtube_max_comments:
-        description: 'Comments per video; integer of all (all vereist allow_unbounded)'
         required: true
         default: '200'
         type: string
+      youtube_comment_selection:
+        description: 'platform = alleen ophalen; knowledge = explainable review-kandidaten maken'
+        required: true
+        default: platform
+        type: choice
+        options: [platform, knowledge]
+      youtube_comment_review_limit:
+        required: true
+        default: '50'
+        type: string
+      knowledge_goal:
+        description: 'Doel van kennisreview; verplicht bij comment_selection=knowledge'
+        required: false
+        type: string
+      knowledge_target_owner:
+        description: 'Canonieke eigenaar voor kandidaat-review'
+        required: true
+        default: webactueel-workflow
+        type: choice
+        options: [webactueel-workflow, leads, seo, design, elementor, wordpressqualityarchitect, website-qa-checklist]
+      knowledge_keywords:
+        description: 'Optionele komma-gescheiden reviewtermen'
+        required: false
+        type: string
+      youtube_access_basis:
+        description: 'Vooraf beoordeelde basis: prior-written-permission of applicable-law-reviewed'
+        required: true
+        default: unverified
+        type: choice
+        options: [unverified, prior-written-permission, applicable-law-reviewed]
+      public_request_acknowledged:
+        description: 'Bevestig dat requestvelden in een publieke repository publiek kunnen worden'
+        required: true
+        default: false
+        type: boolean
       allow_audio_fallback:
-        description: 'Alleen voor expliciet geautoriseerde niet-YouTube-audio'
         required: true
         default: false
         type: boolean
       audio_access_authorized:
-        description: 'Bevestig rechtmatige audio-toegang/transcriptie voor niet-YouTube fallback'
         required: true
         default: false
         type: boolean
       analysis_content_allowed:
-        description: 'Bewaar kortstondige transcript/comment-artifacts voor analyse/parafrase'
+        description: 'Alleen voor private/local runtime; publieke repo weigert raw transcript/comment persistence'
         required: true
-        default: true
+        default: false
         type: boolean
       reuse_allowed:
-        description: 'Sta inhoudelijk hergebruik buiten analyse toe; vereist concrete rechtenbasis'
         required: true
         default: false
         type: boolean
       rights_basis:
-        description: 'Rechten-/gebruiksbasis; analysis-paraphrase-only is geldig voor analyse-artifacts'
         required: true
         default: analysis-paraphrase-only
         type: string
       source_set_version:
-        description: 'Concrete actuele Project Transcriberen source_set_version; placeholders worden geweigerd'
+        description: 'Moet exact gelijk zijn aan toolkit-contract.json'
         required: true
+        default: '2.0.0-audit-hardening'
         type: string
 
 permissions:
@@ -135,7 +152,6 @@ jobs:
       run: ${{ steps.resolve.outputs.run }}
       request_id: ${{ steps.resolve.outputs.request_id }}
       install_whisper: ${{ steps.resolve.outputs.install_whisper }}
-      reuse_allowed: ${{ steps.resolve.outputs.reuse_allowed }}
       persist_content: ${{ steps.resolve.outputs.persist_content }}
     steps:
       - name: Checkout
@@ -147,6 +163,7 @@ jobs:
         id: resolve
         env:
           REQUEST_FILE: requests/transcribe.json
+          GITHUB_REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
           INPUT_URL: ${{ inputs.url }}
           INPUT_MODE: ${{ inputs.mode }}
           INPUT_LANGUAGE: ${{ inputs.language }}
@@ -165,6 +182,13 @@ jobs:
           INPUT_YOUTUBE_INCLUDE_COMMENTS: ${{ inputs.youtube_include_comments }}
           INPUT_YOUTUBE_COMMENT_SORT: ${{ inputs.youtube_comment_sort }}
           INPUT_YOUTUBE_MAX_COMMENTS: ${{ inputs.youtube_max_comments }}
+          INPUT_YOUTUBE_COMMENT_SELECTION: ${{ inputs.youtube_comment_selection }}
+          INPUT_YOUTUBE_COMMENT_REVIEW_LIMIT: ${{ inputs.youtube_comment_review_limit }}
+          INPUT_KNOWLEDGE_GOAL: ${{ inputs.knowledge_goal }}
+          INPUT_KNOWLEDGE_TARGET_OWNER: ${{ inputs.knowledge_target_owner }}
+          INPUT_KNOWLEDGE_KEYWORDS: ${{ inputs.knowledge_keywords }}
+          INPUT_YOUTUBE_ACCESS_BASIS: ${{ inputs.youtube_access_basis }}
+          INPUT_PUBLIC_REQUEST_ACKNOWLEDGED: ${{ inputs.public_request_acknowledged }}
           INPUT_ALLOW_AUDIO_FALLBACK: ${{ inputs.allow_audio_fallback }}
           INPUT_AUDIO_ACCESS_AUTHORIZED: ${{ inputs.audio_access_authorized }}
           INPUT_ANALYSIS_CONTENT_ALLOWED: ${{ inputs.analysis_content_allowed }}
@@ -186,7 +210,15 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.run == 'true'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     timeout-minutes: 330
+    concurrency:
+      group: transcribe-${{ needs.resolve.outputs.request_id }}
+      cancel-in-progress: false
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -206,7 +238,8 @@ jobs:
       - name: Install verified Python extraction dependencies
         run: bash scripts/install_python_deps.sh
 
-      - name: Install FFmpeg runtime
+      - name: Install FFmpeg only for authorized Whisper fallback
+        if: needs.resolve.outputs.install_whisper == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -215,19 +248,31 @@ jobs:
           timeout 300s sudo apt-get "${APT_OPTS[@]}" install -y --no-install-recommends ffmpeg
           command -v ffmpeg
           command -v ffprobe
-          ffmpeg -version
-          ffprobe -version
 
-      - name: Install pinned local media/transcription tools
+      - name: Install pinned local tools
         run: bash scripts/install_tools.sh '${{ needs.resolve.outputs.install_whisper }}'
 
       - name: Execute public-source runtime
         env:
           REQUEST_FILE: resolved-request.json
+          GITHUB_REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
         run: python scripts/runtime.py
 
-      - name: Validate result contract, artifact integrity and rights gate
+      - name: Validate result contract, privacy and provenance
+        id: result_validation
         run: python scripts/validate_result.py results/result.json
+
+      - name: Build deterministic result checksum receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          find results -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > results/SHA256SUMS.txt
+          test -s results/SHA256SUMS.txt
+
+      - name: Attest result checksum receipt
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: results/SHA256SUMS.txt
 
       - name: Publish provenance summary
         if: always()
@@ -236,16 +281,13 @@ jobs:
           echo '## Transcriberen controlled-runtime' >> "$GITHUB_STEP_SUMMARY"
           echo '' >> "$GITHUB_STEP_SUMMARY"
           echo "Request: ${{ needs.resolve.outputs.request_id }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Analysis/reuse artifact persistence: ${{ needs.resolve.outputs.persist_content }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Content persistence: ${{ needs.resolve.outputs.persist_content }}" >> "$GITHUB_STEP_SUMMARY"
           if [ -f results/result.json ]; then
-            python -c 'import json; r=json.load(open("results/result.json", encoding="utf-8")); print("Detected mode: {}\nEvidence level: {}\nUsage mode: {}\nContent persisted: {}\nContent SHA-256: {}".format(r.get("detected_mode"), r.get("evidence_level"), r.get("usage_mode"), r.get("content_persisted"), r.get("content_sha256")))' >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if [ -f results/youtube-index.json ]; then
-            python -c 'import json; x=json.load(open("results/youtube-index.json", encoding="utf-8")); print("Collection status: {}\nCandidates: {}\nEligible: {}\nSelected: {}\nTranscripts: {}\nDiscovery possibly truncated: {}".format(x.get("collection_status"), x.get("candidate_count"), x.get("eligible_count"), x.get("selected_count"), x.get("transcript_count"), (x.get("discovery") or {}).get("possibly_truncated")))' >> "$GITHUB_STEP_SUMMARY"
+            python -c 'import json; r=json.load(open("results/result.json", encoding="utf-8")); p=r.get("runtime_provenance") or {}; print("Mode: {}\nEvidence: {}\nUsage: {}\nSource set: {}\nHead SHA: {}\nRun ID: {}\nContent persisted: {}".format(r.get("detected_mode"), r.get("evidence_level"), r.get("usage_mode"), (r.get("source_context") or {}).get("source_set_version"), p.get("head_sha"), p.get("run_id"), r.get("content_persisted")))' >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Upload normalized result
-        if: always()
+      - name: Upload validated result
+        if: steps.result_validation.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: transcription-result-${{ needs.resolve.outputs.request_id }}
