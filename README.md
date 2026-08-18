@@ -10,27 +10,31 @@ Accountloze controlled-runtime voor `project-transcriberen`. De repository verza
 - WebVTT/SRT wordt cue-gericht opgeschoond; VTT-metadata, inline timestamps, markup en rolling auto-caption overlap worden verwijderd.
 - Zonder bruikbare caption wordt een item `no_captions`; publieke YouTube gebruikt nooit Whisper/mediafallback.
 - Als YouTube accountloze publieke toegang blokkeert met een anti-botchallenge, rapporteert de runtime `access_blocked`; hij schakelt dan geen cookies, login, proxy of mediafallback in.
-- Zoekresultaten kunnen lokaal worden gefilterd op jaar en minimale views/likes/comments en gerangschikt op relevantie, views, likes, comments of nieuwste upload.
-- Ranking geldt alleen binnen de werkelijk gescande kandidaatset. `youtube-index.json` vermeldt daarom expliciet of discovery mogelijk begrensd was.
+- Zoekresultaten kunnen lokaal worden gefilterd op jaar en minimale views/likes/comments en gerangschikt op relevantie, views, likes, comments, nieuwste upload of reproduceerbaar willekeurig.
+- `sort_by=random` maakt een deterministische pseudo-willekeurige volgorde binnen de opgehaalde kandidaatset met `request_id` als seed. Een nieuwe unieke request-id geeft dus een nieuwe selectie, terwijl dezelfde request reproduceerbaar blijft.
+- Ranking/selectie geldt alleen binnen de werkelijk gescande kandidaatset. `youtube-index.json` vermeldt daarom expliciet of discovery mogelijk begrensd was.
 - Publieke comments zijn analyse-evidence. Persistente comment-artifacts verwijderen standaard auteursnaam/-id; commenttekst zelf kan nog persoonsgegevens bevatten en blijft taakgebonden.
+- Iedere uitgevoerde request moet een concrete actuele `source_context.source_set_version` bevatten; placeholders zoals `set-at-execution` en `manual-dispatch` worden geweigerd.
 
 ## YouTube-capabilities
 
 `mode=youtube` ondersteunt:
 
-- `video`: één gewone video;
+- `video`: één gewone video of openbare livestream-/première-URL;
 - `short`: één Short;
 - `search`: YouTube zoeken via `ytsearch:` en daarna criteria toepassen;
 - `playlist`: playlistitems;
 - `channel_videos`: de `/videos`-tab van een kanaal;
 - `channel_shorts`: de `/shorts`-tab van een kanaal;
-- `channel_all`: video's en Shorts combineren, dedupliceren en vóór selectie eerlijk interleaven.
+- `channel_all`: `/videos`, `/shorts` en `/streams` combineren, dedupliceren en vóór selectie eerlijk interleaven.
 
 Per geselecteerd item wordt relevante metadata vastgelegd. Wanneer `analysis_content_allowed=true` of `reuse_allowed=true`, worden daarnaast de gekozen transcripttrack en optioneel geminimaliseerde comments als kortstondig workflowartifact opgeslagen.
 
 ### Werkbudgetten
 
 Bulkdiscovery heeft standaard `scan_limit: 500`. `max_items` bepaalt hoeveel van de gescande/gerangschikte items daadwerkelijk worden verwerkt. Voor een bewust onbeperkte playlist/kanaalscan gebruikt u `scan_limit: 0` én `allow_unbounded: true`.
+
+Bij `sort_by=random` wordt eerst de toegestane kandidaatset gescand/gefilterd en daarna met `request_id` als seed geordend; anders zou “willekeurig” alleen uit de eerste `max_items` kunnen kiezen. De randomselectie is dus willekeurig binnen de gescande set, niet binnen heel YouTube wanneer discovery begrensd is.
 
 `max_comments: "all"` is eveneens een expliciet onbeperkte operatie en vereist `allow_unbounded: true`. “All” betekent: **best effort voor alle comments die YouTube via yt-dlp blootstelt**, niet een garantie dat verborgen, verwijderde, gemodereerde of tijdelijk niet-ophaalbare comments beschikbaar zijn.
 
@@ -63,7 +67,7 @@ Eén video, automatisch de beste taal volgens Engels → Nederlands → overige:
   "rights_basis": "analysis-paraphrase-only",
   "source_context": {
     "project_id": "project-transcriberen",
-    "source_set_version": "set-at-execution"
+    "source_set_version": "1.9.0-youtube-scenario-completeness"
   }
 }
 ```
@@ -98,10 +102,30 @@ Zoek kandidaten uit 2025, rangschik binnen de kandidaatset op views en verwerk d
   "rights_basis": "analysis-paraphrase-only",
   "source_context": {
     "project_id": "project-transcriberen",
-    "source_set_version": "set-at-execution"
+    "source_set_version": "1.9.0-youtube-scenario-completeness"
   }
 }
 ```
+
+Eén willekeurige video die aan zoekcriteria voldoet:
+
+```json
+{
+  "request_id": "random-seo-2026-001",
+  "mode": "youtube",
+  "youtube": {
+    "scope": "search",
+    "query": "technical SEO",
+    "year_from": 2026,
+    "min_views": 1000,
+    "sort_by": "random",
+    "candidate_limit": 200,
+    "max_items": 1
+  }
+}
+```
+
+Gebruik daarnaast dezelfde eigenaar-, rechten- en `source_context`-velden als in het volledige voorbeeld. De request-id is de random seed; wijzig die voor een nieuwe trekking.
 
 Heel kanaal zonder discoverylimiet en alle door yt-dlp bereikbare comments:
 
@@ -118,7 +142,7 @@ Heel kanaal zonder discoverylimiet en alle door yt-dlp bereikbare comments:
 }
 ```
 
-Gebruik de volledige requestvelden uit het eerste voorbeeld eromheen. Een onbeperkte run blijft afhankelijk van YouTube-beschikbaarheid, rate limits en GitHub Actions-runtimegrenzen; `youtube-index.json` rapporteert fouten en completeness-signalen in plaats van absolute volledigheid te claimen.
+`channel_all` omvat de openbare `/videos`, `/shorts` en `/streams`-tabs en dedupliceert overlappende video-id's. Gebruik de volledige requestvelden uit het eerste voorbeeld eromheen. Een onbeperkte run blijft afhankelijk van YouTube-beschikbaarheid, rate limits en GitHub Actions-runtimegrenzen; `youtube-index.json` rapporteert fouten en completeness-signalen in plaats van absolute volledigheid te claimen.
 
 ## Niet-YouTube-bronnen
 
@@ -138,14 +162,14 @@ De bestaande routes blijven beschikbaar:
 - Trafilatura 2.1.0;
 - lokale Python parsing/normalisatie.
 
-Er is geen YouTube Data API-key, login, cookies of MCP-server nodig. De runtime omzeilt geen login, DRM, betaalmuur, CAPTCHA of leeftijdscontrole.
+Er is geen YouTube Data API-key, login, cookies of MCP-server nodig. De runtime omzeilt geen login, DRM, betaalmuur, CAPTCHA of leeftijdscontrole. Een externe PO-token-provider is niet automatisch onderdeel van deze controlled-runtime; toevoeging daarvan vereist een afzonderlijke capability-, licentie-, security- en bronreview.
 
 ## Output
 
 De workflow publiceert `transcription-result-<request_id>` met:
 
 - `result.json`: provenance, toolversies, rechten-/gebruiksmodus en samenvatting;
-- `youtube-index.json`: discoverybudget, mogelijk-truncated signaal, selectie, collection status, transcript/comment-fouten en itemmetadata;
+- `youtube-index.json`: discoverybudget, mogelijk-truncated signaal, selectie, collection status, transcript/comment-fouten en itemmetadata; bij `sort_by=random` ook de gebruikte request-id-seed;
 - `items/<video-id>/metadata.json`;
 - `items/<video-id>/transcript.md` wanneer analyse/reuse-persistence is toegestaan en captions bestaan;
 - `items/<video-id>/comments.json` wanneer comments zijn aangevraagd en analyse/reuse-persistence is toegestaan; directe auteursnaam/-id worden niet opgeslagen;
