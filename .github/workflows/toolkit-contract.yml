@@ -121,7 +121,7 @@ jobs:
 
           codeql = pathlib.Path('.github/workflows/codeql.yml').read_text(encoding='utf-8')
           assert codeql.count('github/codeql-action/') == 2
-          assert codeql.count('@f205ea1c3313d32999d8d6a48b4f6530d4437b38') == 2
+          assert codeql.count('@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd') == 2
           assert 'validate_codeql_sarif.py' in codeql
           assert 'language: [python, actions]' in codeql
 
