@@ -10,7 +10,7 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 BIN = ROOT / "tools" / "bin"
@@ -75,11 +75,32 @@ def language_family(code):
     return code.split("-", 1)[0].split(".", 1)[0]
 
 
+def _format_is_translation(item):
+    if not isinstance(item, dict):
+        return False
+    url = item.get("url")
+    if not isinstance(url, str) or not url:
+        return False
+    try:
+        return bool(parse_qs(urlsplit(url).query).get("tlang"))
+    except Exception:
+        return False
+
+
 def _track_codes(mapping):
-    return sorted(
-        code for code, formats in (mapping or {}).items()
-        if code != "live_chat" and formats and LANG_TAG_RE.fullmatch(str(code))
-    )
+    codes = []
+    for code, formats in (mapping or {}).items():
+        if code == "live_chat" or not formats or not LANG_TAG_RE.fullmatch(str(code)):
+            continue
+        usable = [item for item in formats if isinstance(item, dict)]
+        # yt-dlp's skip=translated_subs is requested for every YouTube call,
+        # but historical edge cases have leaked translated tracks. A YouTube
+        # caption URL with `tlang` is a translated target, so never choose a
+        # track when every usable format is explicitly translated.
+        if usable and all(_format_is_translation(item) for item in usable):
+            continue
+        codes.append(code)
+    return sorted(codes)
 
 
 def choose_caption_track(meta, preferred_language="auto"):

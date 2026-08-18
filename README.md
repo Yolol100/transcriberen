@@ -6,7 +6,7 @@ Accountloze controlled-runtime voor `project-transcriberen`. De repository verza
 
 - Publieke YouTube: **metadata, openbare captions en optioneel openbare comments; nooit audio/video-download**.
 - Captionkeuze bij `language=auto`: **Engels → Nederlands → eerste overige taal**. Binnen dezelfde taal: handmatige captions vóór automatische captions.
-- Auto-vertaalde YouTube-captions worden bij discovery overgeslagen, zodat de fallback echte beschikbare captiontracks beoordeelt.
+- Auto-vertaalde YouTube-captions worden bij discovery overgeslagen. De selector controleert daarnaast caption-URL’s op YouTube `tlang`-vertaling, omdat `skip=translated_subs` in edge-cases niet voldoende kan zijn.
 - Als een YouTube-video geen bruikbare openbare captiontrack heeft, wordt dat item als `no_captions` vastgelegd. Er is bewust geen Whisper/mediafallback voor publieke YouTube.
 - Zoekresultaten kunnen lokaal worden gefilterd op jaar en minimale views/likes/comments en gerangschikt op relevantie, views, likes, comments of nieuwste upload.
 - Een ranking bij YouTube-search geldt alleen binnen de opgehaalde kandidaatset (`candidate_limit`), niet als absolute ranglijst van heel YouTube.

@@ -29,6 +29,16 @@ class YoutubeRuntimeTests(unittest.TestCase):
         meta = {"subtitles": {"en": [{}], "fr": [{}]}, "automatic_captions": {}}
         self.assertEqual(youtube_runtime.choose_caption_track(meta, "fr"), {"language": "fr", "kind": "manual"})
 
+    def test_translated_tlang_track_is_not_selected(self):
+        meta = {
+            "subtitles": {},
+            "automatic_captions": {
+                "en": [{"url": "https://www.youtube.com/api/timedtext?lang=nl&tlang=en"}],
+                "nl": [{"url": "https://www.youtube.com/api/timedtext?lang=nl"}],
+            },
+        }
+        self.assertEqual(youtube_runtime.choose_caption_track(meta), {"language": "nl", "kind": "automatic"})
+
     def test_subtitle_command_never_downloads_media(self):
         cmd = youtube_runtime.subtitle_command("https://www.youtube.com/watch?v=abc", {"language": "en", "kind": "manual"}, "/tmp/x.%(ext)s")
         self.assertIn("--skip-download", cmd)

@@ -69,7 +69,7 @@
     "Only public HTTP(S) sources and accountless public YouTube discovery; no login, cookie, credential, DRM, paywall, CAPTCHA or age-control bypass.",
     "Public YouTube is captions, metadata and optional public comments only; audio/video download and Whisper fallback are blocked.",
     "Automatic YouTube caption choice is English, then Dutch, then the first other available language; manual captions beat automatic captions within the same language.",
-    "Auto-translated YouTube caption variants are excluded during selection using the supported yt-dlp translated_subs skip argument.",
+    "Auto-translated YouTube caption variants are rejected using yt-dlp translated_subs skipping plus a local tlang URL guard for known metadata edge cases.",
     "YouTube search rankings are relative to the fetched candidate set and must not be presented as a global ranking of all YouTube.",
     "Public comments may contain personal data; they are task-scoped analysis evidence and never automatic project truth.",
     "analysis_content_allowed permits short-lived analysis/paraphrase artifacts only and does not imply reuse rights.",
