@@ -1,0 +1,38 @@
+name: Dependency Lock Audit
+
+on:
+  pull_request:
+    paths:
+      - 'requirements.txt'
+      - '.github/workflows/lock-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  generate-lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Generate fully hashed lock candidate
+        env:
+          PIP_INDEX_URL: https://pypi.org/simple
+          PIP_DISABLE_PIP_VERSION_CHECK: '1'
+        run: |
+          set -euo pipefail
+          python -m pip install --no-input pip-tools
+          pip-compile --generate-hashes --resolver=backtracking --strip-extras --output-file requirements.lock requirements.txt
+          python -m pip install --dry-run --require-hashes --only-binary=:all: -r requirements.lock
+          echo '=== REQUIREMENTS_LOCK_BEGIN ==='
+          cat requirements.lock
+          echo '=== REQUIREMENTS_LOCK_END ==='
