@@ -37,7 +37,7 @@ def yt_base(*, single=False, youtube_extractor_args=None):
     extractor_args.extend(youtube_extractor_args or [])
     cmd = [
         str(BIN / "yt-dlp"),
-        "--no-config", "--no-cookies", "--no-netrc", "--no-warnings",
+        "--no-config", "--no-cookies", "--no-warnings",
         "--skip-download",
         "--extractor-args", "youtube:" + ";".join(extractor_args),
     ]
