@@ -52,13 +52,17 @@ jobs:
           python - <<'PY'
           import hashlib
           from pathlib import Path
-          from packaging.utils import canonicalize_name, parse_wheel_filename
 
           rows = []
           for wheel in sorted(Path('wheels').glob('*.whl')):
-              name, version, _build, _tags = parse_wheel_filename(wheel.name)
+              stem = wheel.name[:-4]
+              parts = stem.split('-')
+              if len(parts) < 5 or not parts[0] or not parts[1]:
+                  raise SystemExit(f'unexpected wheel filename: {wheel.name}')
+              name = parts[0].replace('_', '-').lower()
+              version = parts[1]
               digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
-              rows.append((canonicalize_name(name), str(version), digest, wheel.name))
+              rows.append((name, version, digest, wheel.name))
           if not rows:
               raise SystemExit('no wheels resolved')
           if len({name for name, *_ in rows}) != len(rows):
