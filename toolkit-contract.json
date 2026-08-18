@@ -1,9 +1,10 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "owner_skill": "webactueel-workflow",
   "owner_mode": "transcribeer",
   "project_id": "project-transcriberen",
   "repository": "Yolol100/transcriberen",
+  "source_set_version": "2.0.0-audit-hardening",
   "evidence_role": "controlled_runtime_public_source_discovery_caption_comment_acquisition_and_transcription",
   "requires_account": false,
   "requires_api_key": false,
@@ -13,7 +14,7 @@
       "id": "yt-dlp",
       "version": "2026.07.04",
       "sha256": "495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd",
-      "trigger_when": "public YouTube search/channel/playlist/video/Short/stream metadata, captions or comments; public media metadata/subtitles; or authorized non-YouTube extraction",
+      "trigger_when": "approved public YouTube discovery/captions/comments; public media metadata/subtitles; or authorized non-YouTube extraction",
       "outputs": ["YouTube discovery candidates", "selected captions", "public comments", "normalized metadata", "temporary authorized non-YouTube audio"]
     },
     {
@@ -52,8 +53,8 @@
     {
       "id": "python-source-parser",
       "version": "repo",
-      "trigger_when": "RSS/Atom/sitemap parsing, YouTube result normalization/ranking/selection or provenance validation is needed",
-      "outputs": ["normalized discovered links", "YouTube selection/index", "provenance"]
+      "trigger_when": "RSS/Atom/sitemap parsing, YouTube result normalization/ranking/selection, comment review ranking or provenance validation is needed",
+      "outputs": ["normalized discovered links", "YouTube selection/index", "comment review candidates", "provenance"]
     }
   ],
   "usage_assertions": [
@@ -62,23 +63,26 @@
     {"tool": "ffmpeg", "path": "scripts/runtime.py", "contains": "ffmpeg"},
     {"tool": "whisper.cpp", "path": "scripts/install_tools.sh", "contains": "WHISPER_SHA256"},
     {"tool": "whisper-base-model", "path": "scripts/install_tools.sh", "contains": "WHISPER_MODEL_SHA256"},
-    {"tool": "trafilatura", "path": "requirements.txt", "contains": "trafilatura==2.1.0"},
-    {"tool": "python-source-parser", "path": "scripts/youtube_runtime.py", "contains": "rank_metadata"}
+    {"tool": "trafilatura", "path": "requirements.lock", "contains": "trafilatura==2.1.0"},
+    {"tool": "python-source-parser", "path": "scripts/youtube_runtime.py", "contains": "rank_comment_candidates"}
   ],
   "boundaries": [
-    "Only public HTTP(S) sources and accountless public YouTube discovery; no login, cookie, credential, DRM, paywall, CAPTCHA or age-control bypass.",
+    "Only public HTTP(S) sources and approved accountless public YouTube discovery; no login, cookie, credential, DRM, paywall, CAPTCHA or age-control bypass.",
+    "Public YouTube automated execution is fail-closed unless the request records prior written permission or an applicable-law basis that has already been reviewed outside this runtime; the runtime never invents a legal basis.",
     "An upstream public-YouTube anti-bot/access denial is reported as access_blocked evidence; the runtime does not answer it by enabling cookies, login, proxying or media fallback.",
     "Public YouTube is captions, metadata and optional public comments only; audio/video download and Whisper fallback are blocked.",
+    "A public GitHub repository may carry only explicitly acknowledged public request state and never persists transcript/comment source content; content analysis requires a private or local runtime.",
     "Automatic YouTube caption choice is English, then Dutch, then the first other available language; manual captions beat automatic captions within the same language.",
     "Auto-translated YouTube caption variants are rejected using yt-dlp translated_subs skipping plus a local tlang URL guard for known metadata edge cases.",
     "WebVTT/SRT normalization strips metadata, timestamps and markup and collapses rolling auto-caption overlap before analysis.",
-    "channel_all combines the public videos, shorts and streams tabs and deduplicates overlapping video IDs before selection.",
+    "channel_all combines the public videos, shorts and streams tabs and deduplicates overlapping video IDs before selection; channel_streams is also directly addressable.",
     "YouTube rankings and random selection are relative to the fetched candidate set and must not be presented as global coverage of all YouTube.",
     "sort_by=random uses request_id as a reproducible pseudo-random seed so identical requests are auditable while new request IDs can produce a new draw.",
-    "Bulk playlist/channel discovery defaults to scan_limit=500; scan_limit=0 requires explicit allow_unbounded=true.",
-    "max_comments=all is best-effort for comments exposed to yt-dlp/YouTube and requires explicit allow_unbounded=true; it never proves global comment completeness.",
-    "Persisted public-comment evidence minimizes direct commenter identity fields; comment text can still contain personal data and remains task-scoped analysis evidence.",
-    "Every executed request requires a concrete source_context.source_set_version; placeholder provenance values are rejected.",
+    "Bounded YouTube work has explicit item, scan, per-item comment and total comment budgets; larger requests require explicit allow_unbounded and still remain under hard runtime caps.",
+    "max_comments=all is best-effort for comments exposed to yt-dlp/YouTube, is limited to at most five selected items, and never proves global comment completeness.",
+    "Persisted public-comment evidence minimizes direct commenter identity fields and redacts obvious email, phone, URL and handle patterns before persistence; remaining text is still untrusted task-scoped evidence.",
+    "Knowledge-oriented comment ranking is candidate triage only: it uses explainable engagement/creator/pinned/keyword signals and never promotes a comment to project truth without semantic owner review.",
+    "Every executed request must exactly match this toolkit-contract source_set_version; placeholders and stale concrete versions are rejected.",
     "analysis_content_allowed permits short-lived analysis/paraphrase artifacts only and does not imply reuse rights.",
     "Non-YouTube Whisper fallback requires allow_audio_fallback=true, audio_access_authorized=true and a concrete authorization/rights_basis.",
     "Raw source content is never automatically project truth; webactueel-workflow owns quality, currentness, deduplication and knowledge promotion.",
