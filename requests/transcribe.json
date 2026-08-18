@@ -31,6 +31,6 @@
   "requested_by": "template",
   "source_context": {
     "project_id": "project-transcriberen",
-    "source_set_version": "set-at-execution"
+    "source_set_version": "1.9.0-youtube-scenario-completeness"
   }
 }

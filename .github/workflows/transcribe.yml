@@ -33,11 +33,11 @@ on:
         required: false
         type: string
       youtube_sort_by:
-        description: 'Rangschik binnen opgehaalde kandidaatset'
+        description: 'Rangschik/selecteer binnen opgehaalde kandidaatset'
         required: true
         default: relevance
         type: choice
-        options: [relevance, views, likes, comments, newest]
+        options: [relevance, views, likes, comments, newest, random]
       youtube_max_items:
         description: 'Max geselecteerde videos; 0 = alle items binnen de discovery-scan'
         required: true
@@ -120,9 +120,8 @@ on:
         default: analysis-paraphrase-only
         type: string
       source_set_version:
-        description: 'Actuele Project Transcriberen source_set_version'
+        description: 'Concrete actuele Project Transcriberen source_set_version; placeholders worden geweigerd'
         required: true
-        default: manual-dispatch
         type: string
 
 permissions:
@@ -130,7 +129,7 @@ permissions:
 
 jobs:
   resolve:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       run: ${{ steps.resolve.outputs.run }}
       request_id: ${{ steps.resolve.outputs.request_id }}
