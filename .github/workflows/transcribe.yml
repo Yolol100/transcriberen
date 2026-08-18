@@ -39,7 +39,7 @@ on:
         type: choice
         options: [relevance, views, likes, comments, newest]
       youtube_max_items:
-        description: 'Max geselecteerde videos; 0 = alle ontdekte items'
+        description: 'Max geselecteerde videos; 0 = alle items binnen de discovery-scan'
         required: true
         default: '20'
         type: string
@@ -48,6 +48,16 @@ on:
         required: true
         default: '100'
         type: string
+      youtube_scan_limit:
+        description: 'Max te scannen playlist/kanaalitems (0 = onbeperkt; vereist allow_unbounded)'
+        required: true
+        default: '500'
+        type: string
+      youtube_allow_unbounded:
+        description: 'Expliciete opt-in voor scan_limit=0 en/of max_comments=all'
+        required: true
+        default: false
+        type: boolean
       youtube_year_from:
         description: 'Optioneel eerste uploadjaar, bv. 2025'
         required: false
@@ -80,7 +90,7 @@ on:
         type: choice
         options: [top, new]
       youtube_max_comments:
-        description: 'Comments per video; integer of all'
+        description: 'Comments per video; integer of all (all vereist allow_unbounded)'
         required: true
         default: '200'
         type: string
@@ -142,6 +152,8 @@ jobs:
           INPUT_YOUTUBE_SORT_BY: ${{ inputs.youtube_sort_by }}
           INPUT_YOUTUBE_MAX_ITEMS: ${{ inputs.youtube_max_items }}
           INPUT_YOUTUBE_CANDIDATE_LIMIT: ${{ inputs.youtube_candidate_limit }}
+          INPUT_YOUTUBE_SCAN_LIMIT: ${{ inputs.youtube_scan_limit }}
+          INPUT_YOUTUBE_ALLOW_UNBOUNDED: ${{ inputs.youtube_allow_unbounded }}
           INPUT_YOUTUBE_YEAR_FROM: ${{ inputs.youtube_year_from }}
           INPUT_YOUTUBE_YEAR_TO: ${{ inputs.youtube_year_to }}
           INPUT_YOUTUBE_MIN_VIEWS: ${{ inputs.youtube_min_views }}
@@ -203,7 +215,7 @@ jobs:
           REQUEST_FILE: resolved-request.json
         run: python scripts/runtime.py
 
-      - name: Validate result contract and rights gate
+      - name: Validate result contract, artifact integrity and rights gate
         run: python scripts/validate_result.py results/result.json
 
       - name: Publish provenance summary
@@ -216,6 +228,9 @@ jobs:
           echo "Analysis/reuse artifact persistence: ${{ needs.resolve.outputs.persist_content }}" >> "$GITHUB_STEP_SUMMARY"
           if [ -f results/result.json ]; then
             python -c 'import json; r=json.load(open("results/result.json", encoding="utf-8")); print("Detected mode: {}\nEvidence level: {}\nUsage mode: {}\nContent persisted: {}\nContent SHA-256: {}".format(r.get("detected_mode"), r.get("evidence_level"), r.get("usage_mode"), r.get("content_persisted"), r.get("content_sha256")))' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f results/youtube-index.json ]; then
+            python -c 'import json; x=json.load(open("results/youtube-index.json", encoding="utf-8")); print("Collection status: {}\nCandidates: {}\nEligible: {}\nSelected: {}\nTranscripts: {}\nDiscovery possibly truncated: {}".format(x.get("collection_status"), x.get("candidate_count"), x.get("eligible_count"), x.get("selected_count"), x.get("transcript_count"), (x.get("discovery") or {}).get("possibly_truncated")))' >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Upload normalized result
