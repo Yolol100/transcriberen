@@ -110,7 +110,6 @@ def normalize_subtitles(path):
         if timing_index is not None:
             text_lines = lines[timing_index + 1:]
         else:
-            # Header-only or malformed metadata blocks should not become transcript text.
             if any(line.startswith(("Kind:", "Language:", "X-TIMESTAMP-MAP")) for line in lines):
                 continue
             text_lines = [line for line in lines if not line.isdigit()]
@@ -250,7 +249,11 @@ def discover_source(req):
     if scope == "channel_shorts":
         return [channel_tab_url(req["url"], "shorts")]
     if scope == "channel_all":
-        return [channel_tab_url(req["url"], "videos"), channel_tab_url(req["url"], "shorts")]
+        return [
+            channel_tab_url(req["url"], "videos"),
+            channel_tab_url(req["url"], "shorts"),
+            channel_tab_url(req["url"], "streams"),
+        ]
     raise ValueError(f"unsupported YouTube scope: {scope}")
 
 
@@ -370,10 +373,18 @@ def thresholds_match(meta, yt):
     return True
 
 
-def rank_metadata(items, sort_by):
+def _random_rank_key(item, seed):
+    meta = item.get("meta") or {}
+    identity = meta.get("id") or meta.get("webpage_url") or item.get("url") or item.get("order") or ""
+    return hashlib.sha256(f"{seed}\0{identity}".encode("utf-8")).digest()
+
+
+def rank_metadata(items, sort_by, seed=""):
     sort_by = sort_by or "relevance"
     if sort_by == "relevance":
         return items
+    if sort_by == "random":
+        return sorted(items, key=lambda item: _random_rank_key(item, str(seed or "")))
     field = {"views": "view_count", "likes": "like_count", "comments": "comment_count", "newest": "upload_date"}[sort_by]
     return sorted(items, key=lambda item: (item["meta"].get(field) is not None, item["meta"].get(field) or 0), reverse=True)
 
@@ -501,7 +512,7 @@ def collect(req, results_dir):
         if year_matches(meta, yt) and thresholds_match(meta, yt):
             hydrated.append({"order": index, "url": candidate["url"], "meta": meta})
 
-    hydrated = rank_metadata(hydrated, yt.get("sort_by", "relevance"))
+    hydrated = rank_metadata(hydrated, yt.get("sort_by", "relevance"), req.get("request_id", ""))
     eligible_count = len(hydrated)
     max_items = int(yt.get("max_items", 20))
     selected = hydrated[:max_items] if max_items > 0 else hydrated
@@ -569,12 +580,14 @@ def collect(req, results_dir):
         "no_caption_count": sum(record.get("status") == "no_captions" for record in item_records),
         "caption_error_count": sum(record.get("status") == "caption_error" for record in item_records),
         "comment_error_count": sum(record.get("comment_status") == "error" for record in item_records),
-        "sort_by": yt.get("sort_by", "relevance"), "year_from": yt.get("year_from"), "year_to": yt.get("year_to"),
+        "sort_by": yt.get("sort_by", "relevance"),
+        "random_seed": req.get("request_id") if yt.get("sort_by") == "random" else None,
+        "year_from": yt.get("year_from"), "year_to": yt.get("year_to"),
         "include_comments": bool(yt.get("include_comments")), "comment_identity_minimized": True,
         "discovery": discovery,
         "ranking_scope_note": (
-            "Ranking is relative to the fetched candidate set; a bounded discovery scan is not a global ranking."
-            if yt.get("scope") == "search" or discovery.get("possibly_truncated") else None
+            "Ranking/selection is relative to the fetched candidate set; a bounded discovery scan is not global YouTube coverage."
+            if yt.get("scope") == "search" or discovery.get("possibly_truncated") or yt.get("sort_by") == "random" else None
         ),
         "comments_scope_note": (
             "Comment extraction is best-effort against comments exposed to yt-dlp/YouTube and is not a guarantee that every public comment was retrievable."
