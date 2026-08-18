@@ -33,6 +33,11 @@ jobs:
           python -m pip install --no-input pip-tools
           pip-compile --generate-hashes --resolver=backtracking --strip-extras --output-file requirements.lock requirements.txt
           python -m pip install --dry-run --require-hashes --only-binary=:all: -r requirements.lock
-          echo '=== REQUIREMENTS_LOCK_BEGIN ==='
-          cat requirements.lock
-          echo '=== REQUIREMENTS_LOCK_END ==='
+
+      - name: Upload generated lock candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: requirements-lock-candidate
+          path: requirements.lock
+          retention-days: 1
+          if-no-files-found: error
