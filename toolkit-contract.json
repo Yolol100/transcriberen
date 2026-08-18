@@ -39,7 +39,7 @@
     "Content is persisted only when reuse_allowed=true and usable extracted content exists; provenance, metadata and hashes may persist without content.",
     "XML DTD/entity declarations are rejected before ElementTree parsing; public HTTP fetches remain byte-bounded.",
     "Audio media and model files are temporary runtime inputs and are never committed to Git.",
-    "Repository CI includes unit/negative tests, ShellCheck, Dependency Review, CodeQL and Dependabot maintenance; external YouTube reachability is monitored separately and is not a false merge guarantee.",
+    "Repository CI includes unit/negative tests, ShellCheck, PyPA pip-audit, CodeQL and Dependabot maintenance; external YouTube reachability is monitored separately and is not a false merge guarantee.",
     "All output is at most controlled_runtime evidence and remains subject to Webactueel-workflow source quality, rights, deduplication, currentness and controlled-write gates."
   ]
 }

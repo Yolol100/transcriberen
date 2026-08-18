@@ -13,7 +13,7 @@ Een release-candidate krijgt alleen 10/10 wanneer op exact dezelfde PR-head alle
 1. **Correctheid** — normale routes, grenswaarden en regressies slagen; YouTube-video, kanaal en playlist worden juist gerouteerd.
 2. **Fail-honest gedrag** — ontbrekende captions, toegangsblokkade, lokale verwerking, partial discovery en bewust niet-uitgevoerde items blijven afzonderlijke staten.
 3. **Security** — publieke URL-gates, geen credentials/cookies/proxy, geen YouTube-audiofallback, XML DTD/entity-blokkade, commandotimeouts en resourcecaps zijn actief.
-4. **Supply chain** — GitHub Actions op volledige commit-SHA; gedownloade runtimes en directe Trafilatura-wheel op SHA-256 gecontroleerd; Dependency Review en Dependabot aanwezig.
+4. **Supply chain** — GitHub Actions op volledige commit-SHA; gedownloade runtimes en directe Trafilatura-wheel op SHA-256 gecontroleerd; PyPA `pip-audit` en Dependabot aanwezig.
 5. **Provenance/integriteit** — resultaat bindt canonical requesthash, commit en runtimebinarydigests; validator herberekent provenance en persisted content.
 6. **CI/static analysis** — syntax, unit/negative tests, ShellCheck, toolkitcontract, CodeQL Python en CodeQL Actions slagen.
 7. **Externe runtime-evidence** — availability probe draait op de PR-head; een upstream blokkade mag negatief bewijs zijn zolang de code die eerlijk rapporteert en geen verboden bypass inzet.
@@ -25,7 +25,8 @@ Een release-candidate krijgt alleen 10/10 wanneer op exact dezelfde PR-head alle
 
 - GitHub Docs: CodeQL ondersteunt afzonderlijk `python` en `actions` en adviseert een language matrix voor advanced setup.
 - GitHub Docs: protected branches/rulesets kunnen required status checks en code-scanning merge protection afdwingen. Dit is repository-governance en staat buiten de bronpatch wanneer geen geschikte admin-writeactie beschikbaar is.
-- GitHub Dependency Review Action 5.0.0: actuele major voor PR-dependencyanalyse; deze repo pinnt commit `a1d282b36b6f3519aa1f3fc636f609c47dddb294`.
+- GitHub Dependency Review Action 5.0.0 is gecontroleerd en geprobeerd; de echte run blokkeerde omdat Dependency Graph in deze repository niet is ingeschakeld. Dat is als onuitvoerbare repositoryinstelling vervangen door een uitvoerbare vulnerabilityscan, niet stilzwijgend genegeerd.
+- PyPA `pip-audit` 2.10.1 is de actuele scanner voor bekende Python-packagekwetsbaarheden. De officiële `gh-action-pip-audit` v1.1.0 wordt vastgezet op geverifieerde commit `1220774d901786e6f652ae159f7b6bc8fea6d266`.
 - GitHub CodeQL Action 4.37.3: gecontroleerde actuele v4-release; deze repo pinnt commit `e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81`.
 - PyPI Trafilatura 2.1.0: universele wheel SHA-256 `0eded5207a806445ddebbe36eae30b9035fe6a2f233c36f6fe82663fca8b9d30`.
 

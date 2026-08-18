@@ -93,12 +93,12 @@ PR's worden technisch getoetst met:
 - Python syntaxcheck en ShellCheck;
 - toolkit-/policycontract;
 - installatie en verificatie van de gepinde media-toolchain;
-- Dependency Review op nieuwe dependencyrisico's;
+- PyPA `pip-audit` op de volledige Python dependencyresolutie;
 - CodeQL voor Python én GitHub Actions-workflows;
 - een niet-blokkerende YouTube Availability Probe die externe runner-bereikbaarheid apart registreert;
 - Dependabot voor periodiek dependency-/Actiononderhoud.
 
-De availability probe draait bij relevante PR-wijzigingen en wekelijks op de default branch en bewaart een JSON-evidenceartifact. Externe YouTube-bereikbaarheid is daarmee observeerbaar maar blijft bewust geen misleidende mergegarantie.
+GitHub Dependency Review is tijdens de audit ook geprobeerd, maar de repository heeft Dependency Graph niet ingeschakeld. Omdat de beschikbare connector die repositoryinstelling niet kan muteren, gebruikt de uitvoerbare 10-poort de officiële PyPA `pip-audit` Action als dependency-vulnerabilityscan. De availability probe draait bij relevante PR-wijzigingen en wekelijks op de default branch en bewaart een JSON-evidenceartifact. Externe YouTube-bereikbaarheid is daarmee observeerbaar maar blijft bewust geen misleidende mergegarantie.
 
 Zie `docs/quality-audit-10.md` voor de formele 10-poort en claimgrens.
 
