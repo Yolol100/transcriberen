@@ -1,6 +1,16 @@
 name: Transcribe Public Source
 
 on:
+  push:
+    branches: [runtime-requests]
+    paths:
+      - 'requests/queue/*.json'
+  workflow_call:
+    inputs:
+      request_json:
+        description: 'Volledig gecontroleerd request JSON volgens het Transcriberen-contract'
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       url:
@@ -79,6 +89,11 @@ on:
         required: true
         default: '200'
         type: string
+      youtube_include_replies:
+        description: 'Replies expliciet meenemen; standaard alleen top-level comments'
+        required: true
+        default: false
+        type: boolean
       youtube_comment_selection:
         description: 'platform = alleen ophalen; knowledge = explainable review-kandidaten maken'
         required: true
@@ -154,15 +169,83 @@ jobs:
       install_whisper: ${{ steps.resolve.outputs.install_whisper }}
       persist_content: ${{ steps.resolve.outputs.persist_content }}
     steps:
-      - name: Checkout
+      - name: Read immutable queue request
+        if: github.event_name == 'push'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 2
           persist-credentials: false
+          path: transport
+
+      - name: Validate queue transport
+        if: github.event_name == 'push'
+        id: queue
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          RUNNER_TEMP_DIR: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, re, subprocess
+          root = pathlib.Path('transport')
+          before, after = os.environ['BEFORE'], os.environ['AFTER']
+          changed = subprocess.check_output(
+              ['git', '-C', str(root), 'diff', '--name-status', before, after], text=True
+          ).splitlines()
+          accepted = []
+          for line in changed:
+              parts = line.split('\t')
+              if len(parts) == 2 and parts[0] == 'A' and re.fullmatch(r'requests/queue/[A-Za-z0-9][A-Za-z0-9._-]{2,79}\.json', parts[1]):
+                  accepted.append(parts[1])
+              elif line.strip():
+                  raise SystemExit(f'queue push may add exactly one request JSON and nothing else: {line}')
+          if len(accepted) != 1:
+              raise SystemExit(f'expected exactly one new queue request, got {len(accepted)}')
+          source = root / accepted[0]
+          request = json.loads(source.read_text(encoding='utf-8'))
+          request_id = str(request.get('request_id') or '')
+          if source.stem != request_id:
+              raise SystemExit('queue filename must equal request_id')
+          if request.get('enabled') is not True:
+              raise SystemExit('queue request must set enabled=true')
+          target = pathlib.Path(os.environ['RUNNER_TEMP_DIR']) / 'incoming-request.json'
+          target.write_text(json.dumps(request, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          print(f'queue request: {request_id}')
+          PY
+
+      - name: Materialize workflow_call request
+        if: github.event_name == 'workflow_call'
+        shell: bash
+        env:
+          REQUEST_JSON: ${{ inputs.request_json }}
+          TARGET: ${{ runner.temp }}/incoming-request.json
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib
+          request = json.loads(os.environ['REQUEST_JSON'])
+          if request.get('enabled') is not True:
+              raise SystemExit('workflow_call request must set enabled=true')
+          pathlib.Path(os.environ['TARGET']).write_text(
+              json.dumps(request, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
+          )
+          PY
+
+      - name: Checkout trusted runtime
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Yolol100/transcriberen
+          ref: main
+          persist-credentials: false
+          path: runtime
 
       - name: Resolve and validate request
         id: resolve
+        working-directory: runtime
         env:
-          REQUEST_FILE: requests/transcribe.json
+          REQUEST_FILE: ${{ runner.temp }}/incoming-request.json
           GITHUB_REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
           INPUT_URL: ${{ inputs.url }}
           INPUT_MODE: ${{ inputs.mode }}
@@ -182,6 +265,7 @@ jobs:
           INPUT_YOUTUBE_INCLUDE_COMMENTS: ${{ inputs.youtube_include_comments }}
           INPUT_YOUTUBE_COMMENT_SORT: ${{ inputs.youtube_comment_sort }}
           INPUT_YOUTUBE_MAX_COMMENTS: ${{ inputs.youtube_max_comments }}
+          INPUT_YOUTUBE_INCLUDE_REPLIES: ${{ inputs.youtube_include_replies }}
           INPUT_YOUTUBE_COMMENT_SELECTION: ${{ inputs.youtube_comment_selection }}
           INPUT_YOUTUBE_COMMENT_REVIEW_LIMIT: ${{ inputs.youtube_comment_review_limit }}
           INPUT_KNOWLEDGE_GOAL: ${{ inputs.knowledge_goal }}
@@ -195,14 +279,14 @@ jobs:
           INPUT_REUSE_ALLOWED: ${{ inputs.reuse_allowed }}
           INPUT_RIGHTS_BASIS: ${{ inputs.rights_basis }}
           INPUT_SOURCE_SET_VERSION: ${{ inputs.source_set_version }}
-        run: python3 scripts/resolve_request.py
+        run: python3 scripts/resolve_request_hardened.py
 
       - name: Upload resolved request for runtime job
         if: steps.resolve.outputs.run == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: resolved-transcription-request
-          path: resolved-request.json
+          path: runtime/resolved-request.json
           retention-days: 1
           if-no-files-found: error
 
@@ -220,10 +304,17 @@ jobs:
       group: transcribe-${{ needs.resolve.outputs.request_id }}
       cancel-in-progress: false
     steps:
-      - name: Checkout
+      - name: Checkout trusted runtime
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: Yolol100/transcriberen
+          ref: main
           persist-credentials: false
+
+      - name: Record runtime SHA
+        id: runtime_sha
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python 3.12
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -256,7 +347,15 @@ jobs:
         env:
           REQUEST_FILE: resolved-request.json
           GITHUB_REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
+          GITHUB_SHA: ${{ steps.runtime_sha.outputs.sha }}
         run: python scripts/runtime.py
+
+      - name: Normalize extended YouTube result for current validator
+        if: always()
+        run: |
+          if [ -f results/youtube-index.json ]; then
+            python scripts/normalize_youtube_result_v2.py results/youtube-index.json
+          fi
 
       - name: Validate result contract, privacy and provenance
         id: result_validation
@@ -282,6 +381,7 @@ jobs:
           echo '' >> "$GITHUB_STEP_SUMMARY"
           echo "Request: ${{ needs.resolve.outputs.request_id }}" >> "$GITHUB_STEP_SUMMARY"
           echo "Content persistence: ${{ needs.resolve.outputs.persist_content }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Runtime SHA: ${{ steps.runtime_sha.outputs.sha }}" >> "$GITHUB_STEP_SUMMARY"
           if [ -f results/result.json ]; then
             python -c 'import json; r=json.load(open("results/result.json", encoding="utf-8")); p=r.get("runtime_provenance") or {}; print("Mode: {}\nEvidence: {}\nUsage: {}\nSource set: {}\nHead SHA: {}\nRun ID: {}\nContent persisted: {}".format(r.get("detected_mode"), r.get("evidence_level"), r.get("usage_mode"), (r.get("source_context") or {}).get("source_set_version"), p.get("head_sha"), p.get("run_id"), r.get("content_persisted")))' >> "$GITHUB_STEP_SUMMARY"
           fi
