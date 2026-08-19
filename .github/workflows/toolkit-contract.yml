@@ -96,13 +96,20 @@ jobs:
           ):
               assert needle in resolver
 
+          hardened_resolver = pathlib.Path('scripts/resolve_request_hardened.py').read_text(encoding='utf-8')
+          assert 'INPUT_YOUTUBE_INCLUDE_REPLIES' in hardened_resolver
+          assert 'base.validate_request(req)' in hardened_resolver
+
           youtube = pathlib.Path('scripts/youtube_runtime.py').read_text(encoding='utf-8')
           for needle in (
               '"--skip-download"', 'skip=translated_subs', 'rank_comment_candidates',
-              'transcript-cues.json', 'comment-review.json', 'channel_streams', '"--sleep-requests"'
+              'transcript-cues.json', 'comment-review.json', 'channel_streams', '"--sleep-requests"',
+              'raise_incomplete_data=1', 'retry-queue.json', 'knowledge-handoff.json'
           ):
               assert needle in youtube
           assert 'bestaudio' not in youtube and '"-x"' not in youtube
+          assert 'SUBTITLE_CLIENT_FALLBACKS' in youtube
+          assert 'max_comments={_comment_limit_args' in youtube
 
           runtime = pathlib.Path('scripts/runtime.py').read_text(encoding='utf-8')
           for needle in (
@@ -124,7 +131,11 @@ jobs:
           ):
               assert needle in workflow
           assert 'artifact-metadata: write' in workflow
-          assert "push:" not in workflow.split('workflow_dispatch:', 1)[0]
+          assert 'workflow_dispatch:' in workflow and 'workflow_call:' in workflow
+          assert 'branches: [runtime-requests]' in workflow
+          assert "requests/queue/*.json" in workflow
+          assert 'ref: main' in workflow
+          assert 'resolve_request_hardened.py' in workflow
           assert "if: steps.result_validation.outcome == 'success'" in workflow
           assert 'attestations: write' in workflow and 'id-token: write' in workflow
 
