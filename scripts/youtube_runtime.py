@@ -8,9 +8,11 @@ import hashlib
 import html
 import json
 import math
+import random
 import re
 import subprocess
 import tempfile
+import time
 from itertools import zip_longest
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit, urlunsplit
@@ -33,11 +35,52 @@ HANDLE_RE = re.compile(r"(?<!\w)@[A-Za-z0-9._-]{2,64}\b")
 PHONE_RE = re.compile(r"(?<!\w)(?:\+?\d[\d .()\-]{7,}\d)(?!\w)")
 TOKEN_RE = re.compile(r"[A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9_-]{1,}")
 
+ITEM_DELAY_MIN_SECONDS = 5.0
+ITEM_DELAY_MAX_SECONDS = 10.0
+TRANSIENT_RETRY_DELAYS = (3, 8, 20)
+RATE_LIMIT_RETRY_DELAYS = (60, 180, 300)
+SUBTITLE_CLIENT_FALLBACKS = ("tv", "mweb", "web_safari", "web_embedded")
+RATE_LIMIT_MARKERS = ("http error 429", "too many requests", "rate limit")
+TRANSIENT_MARKERS = (
+    "incomplete data received", "remote end closed connection", "connection reset",
+    "remotedisconnected", "timed out", "timeout", "temporary failure", "name resolution",
+    "ssl eof", "http error 500", "http error 502", "http error 503", "http error 504",
+)
+
 
 def run(command, *, check=True):
     completed = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     if check and completed.returncode != 0:
         raise RuntimeError(f"command failed ({completed.returncode}): {' '.join(command[:4])}: {completed.stderr[-4000:]}")
+    return completed
+
+
+def _retry_delays_for(completed):
+    if completed.returncode == 124:
+        return ()
+    message = str(completed.stderr or "").casefold()
+    if any(marker in message for marker in RATE_LIMIT_MARKERS):
+        return RATE_LIMIT_RETRY_DELAYS
+    if any(marker in message for marker in TRANSIENT_MARKERS):
+        return TRANSIENT_RETRY_DELAYS
+    return ()
+
+
+def run_youtube_command(command, *, check=True):
+    completed = run(command, check=False)
+    delays = _retry_delays_for(completed)
+    for delay in delays:
+        if completed.returncode == 0:
+            break
+        time.sleep(delay)
+        completed = run(command, check=False)
+        if completed.returncode == 0 or completed.returncode == 124:
+            break
+    if check and completed.returncode != 0:
+        raise RuntimeError(
+            f"command failed ({completed.returncode}): {' '.join(map(str, command[:4]))}: "
+            f"{str(completed.stderr or '')[-4000:]}"
+        )
     return completed
 
 
@@ -48,7 +91,9 @@ def yt_base(*, single=False, youtube_extractor_args=None):
         str(BIN / "yt-dlp"),
         "--no-config", "--no-cookies", "--no-warnings",
         "--skip-download",
-        "--retries", "3", "--extractor-retries", "3", "--sleep-requests", "1",
+        "--retries", "5", "--extractor-retries", "5", "--socket-timeout", "30",
+        "--sleep-requests", "1",
+        "--retry-sleep", "http:exp=2:20", "--retry-sleep", "extractor:exp=2:20",
         "--extractor-args", "youtube:" + ";".join(extractor_args),
     ]
     if single:
@@ -83,7 +128,6 @@ def _token_key(token):
 
 
 def _remove_caption_overlap(previous, current):
-    """Remove rolling-caption overlap without deleting ordinary repetitions."""
     if not current:
         return ""
     if not previous:
@@ -202,19 +246,35 @@ def choose_caption_track(meta, preferred_language="auto"):
     return None
 
 
-def subtitle_command(url, track, output_template):
+def subtitle_command(url, track, output_template, player_client=None):
     code = re.escape(track["language"])
-    cmd = yt_base(single=True)
+    extra = [f"player_client={player_client}"] if player_client else None
+    cmd = yt_base(single=True, youtube_extractor_args=extra)
     cmd += ["--write-subs", "--no-write-auto-subs"] if track["kind"] == "manual" else ["--write-auto-subs", "--no-write-subs"]
     cmd += ["--sub-langs", f"^{code}$", "--sub-format", "vtt/srt/best", "-o", str(output_template), url]
     return cmd
 
 
-def _json_command(source, *, flat=False, comments=False, comment_sort="top", max_comments="200", playlist_end=None):
+def _comment_limit_args(max_comments, include_replies):
+    limit = "all" if str(max_comments).lower() == "all" else str(int(max_comments))
+    if include_replies:
+        return f"{limit},all,all,all,all"
+    return f"{limit},{limit},0,0,1"
+
+
+def _json_command(
+    source, *, flat=False, comments=False, comment_sort="top", max_comments="200",
+    include_replies=False, playlist_end=None, player_client=None,
+):
     extractor_args = []
+    if player_client:
+        extractor_args.append(f"player_client={player_client}")
     if comments:
-        limit = "all" if str(max_comments).lower() == "all" else str(int(max_comments))
-        extractor_args = [f"comment_sort={comment_sort}", f"max_comments={limit},all,all,all"]
+        extractor_args.extend([
+            f"comment_sort={comment_sort}",
+            f"max_comments={_comment_limit_args(max_comments, include_replies)}",
+            "raise_incomplete_data=1",
+        ])
     cmd = yt_base(single=not flat, youtube_extractor_args=extractor_args)
     if flat:
         cmd += ["--flat-playlist", "--ignore-errors"]
@@ -227,7 +287,7 @@ def _json_command(source, *, flat=False, comments=False, comment_sort="top", max
 
 
 def load_json(command):
-    completed = run(command, check=False)
+    completed = run_youtube_command(command, check=False)
     if completed.returncode != 0 or not completed.stdout.strip():
         raise RuntimeError(completed.stderr[-4000:] or "yt-dlp returned no JSON")
     try:
@@ -358,8 +418,8 @@ def discover_candidates(req):
     return discover_candidates_detailed(req)[0]
 
 
-def metadata_for(url):
-    return load_json(_json_command(url))
+def metadata_for(url, player_client=None):
+    return load_json(_json_command(url, player_client=player_client))
 
 
 def selected_metadata(meta, minimize=False):
@@ -414,13 +474,16 @@ def rank_metadata(items, sort_by, seed=""):
     return sorted(items, key=lambda item: (item["meta"].get(field) is not None, item["meta"].get(field) or 0), reverse=True)
 
 
-def download_caption(url, meta, preferred_language="auto"):
+def _caption_attempt(url, meta, preferred_language, player_client):
     track = choose_caption_track(meta, preferred_language)
     if not track:
-        return None, None
+        return None, None, None
     with tempfile.TemporaryDirectory(prefix="webactueel-youtube-sub-") as tmpdir:
         tmp = Path(tmpdir)
-        completed = run(subtitle_command(url, track, tmp / "source.%(ext)s"), check=False)
+        completed = run_youtube_command(
+            subtitle_command(url, track, tmp / "source.%(ext)s", player_client=player_client),
+            check=False,
+        )
         files = sorted([*tmp.glob("source*.vtt"), *tmp.glob("source*.srt")])
         for subtitle_file in files:
             segments = subtitle_segments(subtitle_file)
@@ -432,12 +495,34 @@ def download_caption(url, meta, preferred_language="auto"):
                     "command_exit": completed.returncode,
                     "sha256": sha256_text(text + "\n"),
                     "cue_count": len(segments),
+                    "player_client": player_client or "default",
                     "_segments": segments,
                 }
+                return text, info, completed
+        return None, track, completed
+
+
+def download_caption(url, meta, preferred_language="auto"):
+    last_error = None
+    text, info, completed = _caption_attempt(url, meta, preferred_language, None)
+    if text:
+        return text, info
+    if completed is not None and completed.returncode != 0:
+        last_error = completed.stderr[-4000:] or "subtitle download failed"
+
+    for client in SUBTITLE_CLIENT_FALLBACKS:
+        try:
+            alt_meta = metadata_for(url, player_client=client)
+            text, info, completed = _caption_attempt(url, alt_meta, preferred_language, client)
+            if text:
                 return text, info
-        if completed.returncode != 0:
-            raise RuntimeError(completed.stderr[-4000:] or "subtitle download failed")
-    return None, track
+            if completed is not None and completed.returncode != 0:
+                last_error = completed.stderr[-4000:] or last_error
+        except Exception as exc:
+            last_error = str(exc)[-4000:]
+    if last_error:
+        raise RuntimeError(last_error)
+    return None, choose_caption_track(meta, preferred_language)
 
 
 def _comment_ref(value):
@@ -464,7 +549,6 @@ def redact_comment_text(value):
 
 
 def normalized_comments(raw_comments, max_comments):
-    """Minimize direct identity and obvious identifiers while preserving pseudonymous thread relations."""
     out = []
     for comment in raw_comments or []:
         if not isinstance(comment, dict):
@@ -499,7 +583,6 @@ def _knowledge_tokens(context):
 
 
 def rank_comment_candidates(comments, knowledge_context, limit=50):
-    """Explainable candidate triage only; semantic truth/promotion remains with the owner."""
     wanted = _knowledge_tokens(knowledge_context or {})
     seen = set()
     ranked = []
@@ -554,14 +637,21 @@ def rank_comment_candidates(comments, knowledge_context, limit=50):
 def comments_for(url, req, source_comment_count=None):
     yt = req.get("youtube", {})
     max_comments = yt.get("max_comments", "200")
+    include_replies = bool(yt.get("include_replies", False))
     if str(max_comments) == "0":
         return [], {
             "mode": "bounded", "limit": 0, "raw_extracted": 0, "stored": 0,
             "source_comment_count": source_comment_count, "possibly_truncated": bool(source_comment_count),
-            "completeness": "bounded", "reply_completeness": "best_effort_unverified",
+            "completeness": "bounded", "reply_completeness": "excluded" if not include_replies else "best_effort_unverified",
             "identity_minimized": True, "text_redaction": "obvious-direct-identifiers",
         }
-    data = load_json(_json_command(url, comments=True, comment_sort=yt.get("comment_sort", "top"), max_comments=max_comments))
+    data = load_json(_json_command(
+        url,
+        comments=True,
+        comment_sort=yt.get("comment_sort", "top"),
+        max_comments=max_comments,
+        include_replies=include_replies,
+    ))
     raw_comments = data.get("comments") or []
     comments = normalized_comments(raw_comments, max_comments)
     all_mode = str(max_comments).lower() == "all"
@@ -577,8 +667,8 @@ def comments_for(url, req, source_comment_count=None):
         "stored": len(comments),
         "source_comment_count": reported,
         "possibly_truncated": possibly_truncated,
-        "completeness": "best_effort_unverified" if all_mode else "bounded",
-        "reply_completeness": "best_effort_unverified",
+        "completeness": "best_effort_unverified" if all_mode else "bounded-complete-or-error",
+        "reply_completeness": "best_effort_unverified" if include_replies else "excluded",
         "identity_minimized": True,
         "text_redaction": "obvious-direct-identifiers",
     }
@@ -590,6 +680,10 @@ def classify_comment_error(value):
         return "comments_disabled"
     if any(token in message for token in ("sign in to confirm", "confirm you're not a bot", "confirm you’re not a bot")):
         return "access_blocked"
+    if "incomplete data received" in message:
+        return "incomplete"
+    if any(token in message for token in RATE_LIMIT_MARKERS):
+        return "rate_limited"
     return "error"
 
 
@@ -616,11 +710,34 @@ def _collection_status(records, discovery_errors):
     if not records:
         return "empty"
     transcripts = sum(bool(record.get("transcript_chars")) for record in records)
-    has_errors = bool(discovery_errors) or any(record.get("status") == "caption_error" or record.get("comment_status") in {"error", "access_blocked"} for record in records)
+    has_errors = bool(discovery_errors) or any(
+        record.get("status") == "caption_error" or
+        record.get("comment_status") in {"error", "access_blocked", "incomplete", "rate_limited"}
+        for record in records
+    )
     no_captions = any(record.get("status") == "no_captions" for record in records)
     if transcripts == 0:
         return "no_usable_captions" if not has_errors else "partial"
     return "partial" if has_errors or no_captions else "ok"
+
+
+def _retry_queue_for(records):
+    queue = []
+    for record in records:
+        needs = []
+        if record.get("status") == "caption_error":
+            needs.append("caption")
+        if record.get("comment_status") in {"error", "incomplete", "rate_limited"}:
+            needs.append("comments")
+        if needs:
+            queue.append({
+                "id": record.get("id"),
+                "url": record.get("url"),
+                "needs": needs,
+                "caption_error": record.get("caption_error"),
+                "comment_error": record.get("comment_error"),
+            })
+    return queue
 
 
 def collect(req, results_dir):
@@ -648,7 +765,8 @@ def collect(req, results_dir):
     item_records = []
     aggregate = ["# YouTube collection", ""]
     total_review_candidates = 0
-    for entry in selected:
+    handoff_items = []
+    for selected_index, entry in enumerate(selected):
         meta = entry["meta"]
         artifact_id = _safe_item_id(meta, len(item_records) + 1)
         stored_metadata = selected_metadata(meta, minimize=not persist_content)
@@ -723,7 +841,26 @@ def collect(req, results_dir):
                 "candidates": review_candidates,
             }
             (item_dir / "comment-review.json").write_text(json.dumps(review, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if yt.get("comment_selection") == "knowledge":
+            handoff_items.append({
+                "item_id": record.get("id"),
+                "artifact_id": artifact_id,
+                "url": record.get("url"),
+                "title": stored_metadata.get("title"),
+                "upload_date": stored_metadata.get("upload_date"),
+                "caption_sha256": record.get("transcript_sha256"),
+                "caption_status": record.get("status"),
+                "comment_status": record.get("comment_status"),
+                "review_candidate_count": len(review_candidates),
+                "review_candidates": review_candidates if persist_content else [
+                    {key: candidate.get(key) for key in ("comment_ref", "score", "signals", "like_count", "timestamp")}
+                    for candidate in review_candidates
+                ],
+            })
         item_records.append(record)
+
+        if selected_index + 1 < len(selected):
+            time.sleep(random.uniform(ITEM_DELAY_MIN_SECONDS, ITEM_DELAY_MAX_SECONDS))
 
     aggregate_text = "\n".join(aggregate).strip() + "\n"
     if persist_content:
@@ -731,9 +868,37 @@ def collect(req, results_dir):
             aggregate_text += "\n> Comment evidence is stored separately as minimized untrusted sidecars and is not merged into transcript text.\n"
         (results_dir / "content.md").write_text(aggregate_text, encoding="utf-8")
 
+    retry_queue = _retry_queue_for(item_records)
+    (results_dir / "retry-queue.json").write_text(json.dumps({
+        "schema_version": "webactueel-youtube-retry-queue/1.0",
+        "request_id": req.get("request_id"),
+        "retryable_item_count": len(retry_queue),
+        "items": retry_queue,
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    if yt.get("comment_selection") == "knowledge":
+        handoff = {
+            "schema_version": "webactueel-knowledge-handoff/1.0",
+            "request_id": req.get("request_id"),
+            "target_owner": (req.get("knowledge_context") or {}).get("target_owner"),
+            "goal": (req.get("knowledge_context") or {}).get("goal"),
+            "source_trust": "controlled-runtime-evidence-not-project-truth",
+            "content_included": persist_content,
+            "semantic_review_required": True,
+            "currentness_review_required": True,
+            "deduplication_required": True,
+            "conflict_check_required": True,
+            "public_runtime_note": None if persist_content else (
+                "Raw caption/comment content is intentionally not persisted in a public repository; "
+                "semantic knowledge promotion requires a private/local contract-equivalent run."
+            ),
+            "items": handoff_items,
+        }
+        (results_dir / "knowledge-handoff.json").write_text(json.dumps(handoff, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
     status = _collection_status(item_records, discovery_errors)
     index = {
-        "schema_version": "webactueel-youtube-collection/1.1",
+        "schema_version": "webactueel-youtube-collection/1.2",
         "scope": yt.get("scope", "video"), "query": yt.get("query"),
         "collection_status": status, "language_priority": ["en", "nl", "other"],
         "candidate_count": len(candidates), "eligible_count": eligible_count,
@@ -741,23 +906,29 @@ def collect(req, results_dir):
         "transcript_count": sum(bool(record.get("transcript_chars")) for record in item_records),
         "no_caption_count": sum(record.get("status") == "no_captions" for record in item_records),
         "caption_error_count": sum(record.get("status") == "caption_error" for record in item_records),
-        "comment_error_count": sum(record.get("comment_status") in {"error", "access_blocked"} for record in item_records),
+        "comment_error_count": sum(record.get("comment_status") in {"error", "access_blocked", "incomplete", "rate_limited"} for record in item_records),
         "comments_disabled_count": sum(record.get("comment_status") == "comments_disabled" for record in item_records),
         "comment_review_candidate_count": total_review_candidates,
+        "retryable_item_count": len(retry_queue),
+        "retry_queue_file": "retry-queue.json",
+        "knowledge_handoff_file": "knowledge-handoff.json" if yt.get("comment_selection") == "knowledge" else None,
         "sort_by": yt.get("sort_by", "relevance"),
         "random_seed": req.get("request_id") if yt.get("sort_by") == "random" else None,
         "year_from": yt.get("year_from"), "year_to": yt.get("year_to"),
         "include_comments": bool(yt.get("include_comments")),
+        "include_replies": bool(yt.get("include_replies", False)),
         "comment_selection": yt.get("comment_selection", "platform"),
         "comment_identity_minimized": True,
         "comment_text_redaction": "obvious-direct-identifiers",
+        "item_delay_seconds": [ITEM_DELAY_MIN_SECONDS, ITEM_DELAY_MAX_SECONDS],
         "discovery": discovery,
         "ranking_scope_note": (
             "Ranking/selection is relative to the fetched candidate set; a bounded discovery scan is not global YouTube coverage."
             if yt.get("scope") == "search" or discovery.get("possibly_truncated") or yt.get("sort_by") == "random" else None
         ),
         "comments_scope_note": (
-            "Comment extraction and reply coverage are best-effort against comments exposed to yt-dlp/YouTube; review ranking is candidate triage, not truth or promotion."
+            "Comment extraction is bounded and incomplete-data failures are raised instead of accepted; reply coverage is explicit. "
+            "Review ranking is candidate triage, not truth or promotion."
             if yt.get("include_comments") else None
         ),
         "discovery_errors": discovery_errors, "items": item_records,
