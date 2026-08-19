@@ -175,3 +175,21 @@ jobs:
 
       - name: Verify Trafilatura runtime
         run: python -c "import trafilatura; assert trafilatura.__version__ == '2.1.0'; print(trafilatura.__version__)"
+
+  publish-main-status:
+    needs: validate
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Checkout status publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Publish exact main Toolkit Contract status
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/publish_ci_status.py --context 'post-merge/Toolkit Contract' --result '${{ needs.validate.result }}'
