@@ -13,6 +13,10 @@ Configure GitHub Rulesets or branch protection for `main` with all of these cont
 - do not allow bypass for normal contributors;
 - prefer signed commits when the repository administration model supports them.
 
-The runtime workflow is started with `workflow_dispatch`. Do not commit live request data to `requests/transcribe.json`; that file is only a disabled generic example/local input.
+## Required runtime-requests controls
 
-Branch protection is an external repository-administration control. Repository code and tests can document and detect its absence, but cannot enforce it without GitHub administration permissions.
+`runtime-requests` is an operational append-only transport branch, not a development branch. Configure a GitHub Ruleset or branch protection so normal contributors cannot rewrite or delete history, force-push, or bypass the queue contract. Automated request creation may append exactly one `requests/queue/<request_id>.json` file per transport commit; the workflow independently validates that invariant before using the request.
+
+The runtime supports `workflow_dispatch` for manual/debug runs, immutable request-queue pushes on `runtime-requests` for Chat/connector routing, and `workflow_call` for registered repo-to-repo callers. Do not commit live request data to `requests/transcribe.json`; that file is only a disabled generic example/local input.
+
+Branch protection and Rulesets are external repository-administration controls. Repository code and tests can document and detect their absence, but cannot enforce them without GitHub administration permissions.

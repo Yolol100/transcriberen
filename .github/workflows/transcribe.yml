@@ -76,6 +76,10 @@ on:
       youtube_min_comments:
         required: false
         type: string
+      youtube_include_keywords:
+        description: 'Optionele komma-gescheiden videofiltertermen; cold-email en cold email normaliseren gelijk'
+        required: false
+        type: string
       youtube_include_comments:
         required: true
         default: false
@@ -262,6 +266,7 @@ jobs:
           INPUT_YOUTUBE_MIN_VIEWS: ${{ inputs.youtube_min_views }}
           INPUT_YOUTUBE_MIN_LIKES: ${{ inputs.youtube_min_likes }}
           INPUT_YOUTUBE_MIN_COMMENTS: ${{ inputs.youtube_min_comments }}
+          INPUT_YOUTUBE_INCLUDE_KEYWORDS: ${{ inputs.youtube_include_keywords }}
           INPUT_YOUTUBE_INCLUDE_COMMENTS: ${{ inputs.youtube_include_comments }}
           INPUT_YOUTUBE_COMMENT_SORT: ${{ inputs.youtube_comment_sort }}
           INPUT_YOUTUBE_MAX_COMMENTS: ${{ inputs.youtube_max_comments }}
@@ -348,7 +353,7 @@ jobs:
           REQUEST_FILE: resolved-request.json
           GITHUB_REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
           GITHUB_SHA: ${{ steps.runtime_sha.outputs.sha }}
-        run: python scripts/runtime.py
+        run: python scripts/runtime_topic_filter.py
 
       - name: Normalize extended YouTube result for current validator
         if: always()

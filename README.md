@@ -27,6 +27,25 @@ Requestbestanden voor de queue zijn append-only: de bestandsnaam moet gelijk zij
 
 `channel_all` combineert videos, Shorts en streams, interleavet de tabs en dedupliceert video-ID's. Ranking (`relevance`, `views`, `likes`, `comments`, `newest`, `random`) geldt alleen binnen de werkelijk opgehaalde kandidaatset. `random` gebruikt `request_id` als reproduceerbare seed.
 
+### Onderwerpfilter binnen kanaal of playlist
+
+Gebruik `youtube.include_keywords` om na metadata-hydratatie alleen video's te selecteren die bij het gevraagde onderwerp horen. De filter kijkt naar titel, beschrijving, tags en categorieën. Meerdere termen werken als OR; binnen één term moeten alle genormaliseerde tokens aanwezig zijn. Interpunctie en scheidingstekens worden genormaliseerd, waardoor bijvoorbeeld `cold-email`, `cold email` en `COLD_EMAIL` dezelfde tokens opleveren.
+
+Bij een actief onderwerpfilter scant de runtime eerst het ingestelde `scan_limit` en past daarna `max_items` toe. Daardoor kan een niet-relevante prefix van een kanaal relevante video's later in de scan niet verbergen.
+
+Voor `workflow_dispatch` is `youtube_include_keywords` een komma-gescheiden string. Queue- en `workflow_call`-requests gebruiken bijvoorbeeld:
+
+```json
+"youtube": {
+  "scope": "channel_all",
+  "year_from": 2025,
+  "year_to": 2026,
+  "include_keywords": ["cold-email", "cold outreach"],
+  "max_items": 7,
+  "scan_limit": 250
+}
+```
+
 ## Captions
 
 Bij `language=auto`: Engels -> Nederlands -> eerste andere echte track. Binnen dezelfde taal wint manual van automatic. Auto-vertalingen worden uitgesloten.
@@ -34,6 +53,23 @@ Bij `language=auto`: Engels -> Nederlands -> eerste andere echte track. Binnen d
 Captionextractie probeert eerst de normale anonieme yt-dlp-route. Als die route geen bruikbare caption levert, volgen begrensde accountloze client-fallbacks (`tv`, `mweb`, `web_safari`, `web_embedded`). Er worden geen cookies, accounts, proxies of handmatige PO-tokens toegevoegd. Een echte upstream access-/anti-botblokkade blijft `access_blocked`.
 
 De genormaliseerde transcripttekst is schoon; bij toegestane inhoudspersistentie wordt daarnaast `transcript-cues.json` bewaard zodat een inzicht terug te voeren blijft op het bronmoment.
+
+### Private/local raw-caption output
+
+Voor daadwerkelijke ondertitelinhoud moet de run private of lokaal zijn. Gebruik hetzelfde requestcontract, zet `analysis_content_allowed=true`, behoud een vooraf beoordeelde `youtube_access_basis`, en voer resolver plus runtime lokaal uit. Voorbeeld:
+
+```bash
+GITHUB_EVENT_NAME=push \
+GITHUB_REPOSITORY_VISIBILITY=private \
+REQUEST_FILE=request.json \
+python3 scripts/resolve_request_hardened.py
+
+GITHUB_REPOSITORY_VISIBILITY=private \
+REQUEST_FILE=resolved-request.json \
+python3 scripts/runtime_topic_filter.py
+```
+
+Bij een geldige private/local run worden de geselecteerde captions geschreven naar `results/content.md` en per video naar `results/items/<id>/transcript.md`; cue-level provenance staat in `results/items/<id>/transcript-cues.json`. De publieke requestqueue blijft raw transcript/commentinhoud bewust weigeren.
 
 ## Comments
 
