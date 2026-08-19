@@ -53,3 +53,21 @@ jobs:
             exit 1
           fi
           python scripts/validate_codeql_sarif.py "${sarif_files[@]}"
+
+  publish-main-status:
+    needs: analyze
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Checkout status publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Publish exact main CodeQL status
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/publish_ci_status.py --context 'post-merge/CodeQL' --result '${{ needs.analyze.result }}'
