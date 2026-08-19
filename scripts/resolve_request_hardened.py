@@ -7,9 +7,15 @@ transport support.
 """
 import json
 import os
+import re
 from pathlib import Path
 
 import resolve_request as base
+
+
+def _keyword_identity(value):
+    text = str(value or "").casefold()
+    return " ".join(re.sub(r"[\W_]+", " ", text, flags=re.UNICODE).split())
 
 
 def _normalize_include_keywords(req):
@@ -28,9 +34,11 @@ def _normalize_include_keywords(req):
         text = str(value).strip()
         if not text or len(text) > 80:
             raise ValueError("youtube.include_keywords values must be 1..80 characters")
-        folded = text.casefold()
-        if folded not in seen:
-            seen.add(folded)
+        identity = _keyword_identity(text)
+        if not identity:
+            raise ValueError("youtube.include_keywords values must contain searchable characters")
+        if identity not in seen:
+            seen.add(identity)
             clean.append(text)
     yt["include_keywords"] = clean
     return req
