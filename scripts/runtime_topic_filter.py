@@ -20,9 +20,9 @@ _ORIGINAL_DISCOVERY_PLAYLIST_END = youtube_runtime._discovery_playlist_end
 
 
 def _normalized_tokens(value):
-    """Normalize punctuation so e.g. 'cold-email' and 'cold email' are equal."""
+    """Normalize separators so cold-email, cold_email and cold email are equal."""
     text = str(value or "").casefold()
-    text = re.sub(r"[^\w]+", " ", text, flags=re.UNICODE)
+    text = re.sub(r"[\W_]+", " ", text, flags=re.UNICODE)
     return tuple(token for token in text.split() if token)
 
 
@@ -76,7 +76,7 @@ def collect_with_topic_filter(req, results_dir):
     keywords = list((req.get("youtube") or {}).get("include_keywords") or [])
     index["include_keywords"] = keywords
     index["topic_filter_basis"] = "metadata:title+description+tags+categories" if keywords else None
-    index["topic_filter_normalization"] = "casefold+punctuation-to-space+token-match" if keywords else None
+    index["topic_filter_normalization"] = "casefold+separator-to-space+token-match" if keywords else None
     Path(results_dir, "youtube-index.json").write_text(
         json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
