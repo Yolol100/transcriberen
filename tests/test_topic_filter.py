@@ -18,11 +18,10 @@ RESOLVER_SPEC.loader.exec_module(resolve_request_hardened)
 
 
 class TopicFilterTests(unittest.TestCase):
-    def test_hyphen_and_space_normalize_equally(self):
-        self.assertEqual(
-            runtime_topic_filter._normalized_tokens("Cold-email deliverability"),
-            runtime_topic_filter._normalized_tokens("cold email deliverability"),
-        )
+    def test_hyphen_underscore_and_space_normalize_equally(self):
+        expected = runtime_topic_filter._normalized_tokens("cold email deliverability")
+        self.assertEqual(runtime_topic_filter._normalized_tokens("Cold-email deliverability"), expected)
+        self.assertEqual(runtime_topic_filter._normalized_tokens("COLD_EMAIL deliverability"), expected)
 
     def test_keyword_phrase_matches_metadata_tokens(self):
         meta = {
@@ -32,6 +31,9 @@ class TopicFilterTests(unittest.TestCase):
         }
         self.assertTrue(
             runtime_topic_filter.include_keywords_match(meta, {"include_keywords": ["cold-email"]})
+        )
+        self.assertTrue(
+            runtime_topic_filter.include_keywords_match(meta, {"include_keywords": ["COLD_EMAIL"]})
         )
         self.assertFalse(
             runtime_topic_filter.include_keywords_match(meta, {"include_keywords": ["technical seo"]})
@@ -70,13 +72,18 @@ class TopicFilterTests(unittest.TestCase):
         self.assertEqual(runtime_topic_filter._topic_aware_playlist_end(req), 7)
 
     def test_resolver_accepts_comma_separated_keywords_and_deduplicates(self):
-        req = {"youtube": {"include_keywords": "cold-email, technical seo, COLD-EMAIL"}}
+        req = {"youtube": {"include_keywords": "cold-email, technical seo, COLD_EMAIL, cold email"}}
         result = resolve_request_hardened._normalize_include_keywords(req)
         self.assertEqual(result["youtube"]["include_keywords"], ["cold-email", "technical seo"])
 
     def test_resolver_rejects_too_many_keywords(self):
         req = {"youtube": {"include_keywords": [f"topic-{i}" for i in range(31)]}}
         with self.assertRaisesRegex(ValueError, "at most 30"):
+            resolve_request_hardened._normalize_include_keywords(req)
+
+    def test_resolver_rejects_separator_only_keyword(self):
+        req = {"youtube": {"include_keywords": ["---___"]}}
+        with self.assertRaisesRegex(ValueError, "searchable characters"):
             resolve_request_hardened._normalize_include_keywords(req)
 
 
