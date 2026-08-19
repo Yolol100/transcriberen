@@ -48,7 +48,8 @@ class CommandSafetyScenarios(unittest.TestCase):
         self.assertIn("--skip-download", cmd)
         self.assertIn("--sleep-requests", cmd)
         self.assertIn("comment_sort=new", joined)
-        self.assertIn("max_comments=20,all,all,all", joined)
+        self.assertIn("max_comments=20,20,0,0,1", joined)
+        self.assertIn("raise_incomplete_data=1", joined)
         self.assertNotIn("-x", cmd)
         self.assertNotIn("-f", cmd)
 
@@ -86,7 +87,7 @@ class PrivacyAndCommentsScenarios(unittest.TestCase):
         with mock.patch.object(youtube_runtime, "load_json", return_value=payload):
             _, summary = youtube_runtime.comments_for("https://www.youtube.com/watch?v=x", req, 2)
         self.assertEqual(summary["completeness"], "best_effort_unverified")
-        self.assertEqual(summary["reply_completeness"], "best_effort_unverified")
+        self.assertEqual(summary["reply_completeness"], "excluded")
 
 
 class CollectionRecoveryScenarios(unittest.TestCase):
