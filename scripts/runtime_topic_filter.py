@@ -10,7 +10,6 @@ import json
 import re
 from pathlib import Path
 
-import runtime as base_runtime
 import youtube_runtime
 
 
@@ -84,6 +83,11 @@ def collect_with_topic_filter(req, results_dir):
 
 
 def main():
+    # Importing runtime patches youtube_runtime.run to the bounded subprocess
+    # adapter. Keep that side effect inside actual execution so unit-test import
+    # order cannot leak runtime state into unrelated tests.
+    import runtime as base_runtime
+
     youtube_runtime.collect = collect_with_topic_filter
     base_runtime.youtube_runtime.collect = collect_with_topic_filter
     base_runtime.main()
