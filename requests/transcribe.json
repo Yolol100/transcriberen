@@ -23,6 +23,7 @@
     "include_comments": false,
     "comment_sort": "top",
     "max_comments": "200",
+    "include_replies": false,
     "comment_selection": "platform",
     "comment_review_limit": 50
   },
