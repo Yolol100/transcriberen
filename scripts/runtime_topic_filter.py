@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Runtime entrypoint that adds explainable metadata topic filtering.
 
-The canonical runtime remains scripts/runtime.py. This wrapper narrows hydrated
-YouTube candidates before selection when youtube.include_keywords is present.
-It deliberately filters metadata only; transcript text is not needed to decide
-whether a channel video belongs to the requested topic.
+The canonical extraction policy remains scripts/runtime.py. This wrapper adds
+metadata topic filtering and production subtitle-normalization hardening before
+calling that runtime.
 """
 import json
 import re
@@ -16,6 +15,12 @@ import youtube_runtime
 _ORIGINAL_COLLECT = youtube_runtime.collect
 _ORIGINAL_YEAR_MATCHES = youtube_runtime.year_matches
 _ORIGINAL_DISCOVERY_PLAYLIST_END = youtube_runtime._discovery_playlist_end
+_TIMING_RE = re.compile(
+    r"(?:\d{1,2}:)?\d{2}:\d{2}[,.]\d{3}\s+-->\s+"
+    r"(?:\d{1,2}:)?\d{2}:\d{2}[,.]\d{3}"
+)
+_BLOCK_HEADERS = {"STYLE", "REGION"}
+_HEADER_METADATA_PREFIXES = ("Kind:", "Language:")
 
 
 def _normalized_tokens(value):
@@ -63,6 +68,51 @@ def _topic_aware_playlist_end(req):
     return _ORIGINAL_DISCOVERY_PLAYLIST_END(req)
 
 
+def _next_nonempty_is_timing(lines, index):
+    for following in lines[index + 1:]:
+        candidate = following.strip()
+        if not candidate:
+            continue
+        return bool(_TIMING_RE.search(candidate))
+    return False
+
+
+def normalize_subtitles_hardened(path):
+    """Normalize SRT/WebVTT while discarding syntax, metadata and cue IDs."""
+    lines = Path(path).read_text(encoding="utf-8-sig", errors="replace").splitlines()
+    out = []
+    previous = None
+    skip_block = False
+
+    for index, raw in enumerate(lines):
+        line = raw.strip()
+
+        if skip_block:
+            if not line:
+                skip_block = False
+            continue
+        if not line:
+            continue
+        if line == "WEBVTT" or line.startswith(_HEADER_METADATA_PREFIXES):
+            continue
+        if line in _BLOCK_HEADERS or line == "NOTE" or line.startswith(("NOTE ", "NOTE\t")):
+            skip_block = True
+            continue
+        if _TIMING_RE.search(line) or line.isdigit():
+            continue
+        if _next_nonempty_is_timing(lines, index):
+            # WebVTT cue identifiers are arbitrary strings, not only numbers.
+            continue
+
+        line = re.sub(r"<[^>]+>", "", line)
+        line = re.sub(r"\s+", " ", line).strip()
+        if line and line != previous:
+            out.append(line)
+            previous = line
+
+    return "\n".join(out).strip()
+
+
 def collect_with_topic_filter(req, results_dir):
     youtube_runtime.year_matches = _filtered_year_matches
     youtube_runtime._discovery_playlist_end = _topic_aware_playlist_end
@@ -90,6 +140,7 @@ def main():
 
     youtube_runtime.collect = collect_with_topic_filter
     base_runtime.youtube_runtime.collect = collect_with_topic_filter
+    base_runtime.normalize_subtitles = normalize_subtitles_hardened
     base_runtime.main()
 
 

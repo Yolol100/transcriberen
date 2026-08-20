@@ -1,7 +1,11 @@
 import importlib.util
+import json
+import os
 import pathlib
 import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -85,6 +89,59 @@ class TopicFilterTests(unittest.TestCase):
         req = {"youtube": {"include_keywords": ["---___"]}}
         with self.assertRaisesRegex(ValueError, "searchable characters"):
             resolve_request_hardened._normalize_include_keywords(req)
+
+    def test_workflow_dispatch_prefers_materialized_request_json(self):
+        payload = {
+            "enabled": False,
+            "request_id": "manual-json-test",
+            "youtube": {"include_keywords": "cold_email, technical-seo"},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            request_file = pathlib.Path(tmp) / "incoming-request.json"
+            request_file.write_text(json.dumps(payload), encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {"GITHUB_EVENT_NAME": "workflow_dispatch", "REQUEST_FILE": str(request_file)},
+                clear=False,
+            ):
+                resolved = resolve_request_hardened._request_from_environment()
+        self.assertEqual(resolved["request_id"], "manual-json-test")
+        self.assertEqual(resolved["youtube"]["include_keywords"], ["cold_email", "technical-seo"])
+
+    def test_webvtt_bom_and_short_timestamps_are_removed(self):
+        payload = (
+            "\ufeffWEBVTT\n\n"
+            "intro-cue\n"
+            "00:01.000 --> 00:02.500\n"
+            "<v Speaker>Hello world</v>\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "sample.vtt"
+            path.write_text(payload, encoding="utf-8")
+            normalized = runtime_topic_filter.normalize_subtitles_hardened(path)
+        self.assertEqual(normalized, "Hello world")
+
+    def test_webvtt_note_style_region_and_cue_ids_do_not_leak(self):
+        payload = (
+            "WEBVTT\n"
+            "Kind: captions\n"
+            "Language: en\n\n"
+            "STYLE\n"
+            "::cue { color: lime; }\n\n"
+            "REGION\n"
+            "id:fred\n"
+            "width:40%\n\n"
+            "NOTE internal metadata\n"
+            "do not emit this\n\n"
+            "arbitrary-cue-id\n"
+            "00:00:03.000 --> 00:00:04.000 position:50%\n"
+            "Visible caption\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "sample.vtt"
+            path.write_text(payload, encoding="utf-8")
+            normalized = runtime_topic_filter.normalize_subtitles_hardened(path)
+        self.assertEqual(normalized, "Visible caption")
 
 
 if __name__ == "__main__":
