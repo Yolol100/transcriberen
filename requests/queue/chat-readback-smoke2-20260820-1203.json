@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "request_id": "chat-readback-smoke2-20260820-1203",
+  "owner": "webactueel-workflow",
+  "project_id": "project-transcriberen",
+  "url": "https://brenopolanski.github.io/html5-video-webvtt-example/",
+  "mode": "media",
+  "language": "pt",
+  "allow_audio_fallback": false,
+  "audio_access_authorized": false,
+  "analysis_content_allowed": false,
+  "reuse_allowed": false,
+  "rights_basis": "analysis-paraphrase-only",
+  "public_request_acknowledged": true,
+  "source_context": {
+    "project_id": "project-transcriberen",
+    "source_set_version": "2.0.0-audit-hardening"
+  }
+}
