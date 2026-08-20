@@ -166,8 +166,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          find results -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > results/SHA256SUMS.txt
-          test -s results/SHA256SUMS.txt
+          (
+            cd results
+            find . -type f ! -name SHA256SUMS.txt -print0 \
+              | sort -z \
+              | xargs -0 sha256sum \
+              | sed 's#  \./#  #' \
+              > SHA256SUMS.txt
+            test -s SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+          )
 
       - name: Attest result checksum receipt
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
