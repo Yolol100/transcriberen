@@ -47,6 +47,14 @@ def _normalize_include_keywords(req):
 def _request_from_environment():
     event = os.environ.get("GITHUB_EVENT_NAME", "push")
     request_file = Path(os.environ.get("REQUEST_FILE", "requests/transcribe.json"))
+
+    # Queue, workflow_call and the hardened workflow_dispatch route all
+    # materialize one explicit JSON request before policy validation. Prefer
+    # that immutable file whenever it exists. The legacy dispatch environment
+    # remains as a compatibility fallback for older local/manual callers.
+    if request_file.is_file():
+        return _normalize_include_keywords(json.loads(request_file.read_text(encoding="utf-8")))
+
     if event == "workflow_dispatch":
         req = base.from_dispatch()
         req.setdefault("youtube", {})["include_replies"] = base.as_bool(
@@ -54,6 +62,7 @@ def _request_from_environment():
         )
         req["youtube"]["include_keywords"] = os.environ.get("INPUT_YOUTUBE_INCLUDE_KEYWORDS", "")
         return _normalize_include_keywords(req)
+
     return _normalize_include_keywords(json.loads(request_file.read_text(encoding="utf-8")))
 
 
