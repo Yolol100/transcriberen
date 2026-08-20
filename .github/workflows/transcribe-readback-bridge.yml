@@ -22,14 +22,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           TARGET_SHA: ${{ github.sha }}
-          ADDED_FILES_JSON: ${{ toJson(github.event.head_commit.added) }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import json
           import os
-          import pathlib
-          import re
           import time
           import urllib.parse
           import urllib.request
@@ -70,18 +67,9 @@ jobs:
                       raise RuntimeError(f'unexpected commit-status response: {response.status}')
 
           try:
-              added = json.loads(os.environ.get('ADDED_FILES_JSON') or '[]')
-              accepted = [
-                  path for path in added
-                  if re.fullmatch(r'requests/queue/[A-Za-z0-9][A-Za-z0-9._-]{2,79}\.json', str(path))
-              ]
-              if len(accepted) != 1 or len(added) != 1:
-                  raise RuntimeError(f'expected exactly one added queue request, got {added!r}')
-              request_id = pathlib.PurePosixPath(accepted[0]).stem
-
               publish_status(
                   'pending',
-                  f'waiting for transcription artifact request={request_id}',
+                  'waiting for transcription result artifact',
                   f'https://github.com/{repo}/actions',
               )
 
@@ -119,19 +107,22 @@ jobs:
               if conclusion != 'success':
                   raise RuntimeError(f'transcription run={run_id} conclusion={conclusion}')
 
-              artifact_name = f'transcription-result-{request_id}'
               artifacts = api_json(
                   f'https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100'
               ).get('artifacts') or []
               matches = [
                   item for item in artifacts
-                  if item.get('name') == artifact_name and not item.get('expired')
+                  if str(item.get('name') or '').startswith('transcription-result-')
+                  and not item.get('expired')
               ]
               if len(matches) != 1:
                   raise RuntimeError(
-                      f'run={run_id} expected one live artifact {artifact_name!r}, got {len(matches)}'
+                      f'run={run_id} expected one live transcription-result artifact, got {len(matches)}'
                   )
-              artifact_id = str(matches[0]['id'])
+              artifact = matches[0]
+              artifact_name = str(artifact['name'])
+              request_id = artifact_name.removeprefix('transcription-result-') or 'unknown'
+              artifact_id = str(artifact['id'])
 
               artifact_url = (
                   f'https://github.com/{repo}/actions/runs/{run_id}/artifacts/{artifact_id}'
