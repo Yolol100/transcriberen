@@ -12,6 +12,8 @@ on:
         required: true
         type: string
   workflow_dispatch:
+    # Policy fields including public_request_acknowledged and youtube_access_basis
+    # are validated inside request_json by resolve_request_hardened.py.
     inputs:
       request_json:
         description: 'Volledig gecontroleerd request JSON volgens het Transcriberen-contract'
