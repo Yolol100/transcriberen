@@ -5,6 +5,20 @@ on:
     branches: [runtime-requests]
     paths:
       - 'requests/queue/*.json'
+  workflow_call:
+    inputs:
+      request_json:
+        description: 'Volledig gecontroleerd request JSON volgens het Transcriberen-contract'
+        required: true
+        type: string
+  workflow_dispatch:
+    # Policy fields including public_request_acknowledged and youtube_access_basis
+    # are validated inside request_json by resolve_request_hardened.py.
+    inputs:
+      request_json:
+        description: 'Volledig gecontroleerd request JSON volgens het Transcriberen-contract'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -20,6 +34,7 @@ jobs:
       persist_content: ${{ steps.resolve.outputs.persist_content }}
     steps:
       - name: Read immutable queue request
+        if: github.event_name == 'push'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
@@ -27,6 +42,8 @@ jobs:
           path: transport
 
       - name: Validate queue transport
+        if: github.event_name == 'push'
+        id: queue
         shell: bash
         env:
           BEFORE: ${{ github.event.before }}
@@ -64,6 +81,24 @@ jobs:
               json.dumps(request, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
           )
           print(f'queue request: {request_id}')
+          PY
+
+      - name: Materialize explicit request JSON
+        if: github.event_name == 'workflow_call' || github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          REQUEST_JSON: ${{ inputs.request_json }}
+          TARGET: ${{ runner.temp }}/incoming-request.json
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib
+          request = json.loads(os.environ['REQUEST_JSON'])
+          if request.get('enabled') is not True:
+              raise SystemExit('explicit request must set enabled=true')
+          pathlib.Path(os.environ['TARGET']).write_text(
+              json.dumps(request, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
+          )
           PY
 
       - name: Checkout trusted runtime
