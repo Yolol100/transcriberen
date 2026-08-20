@@ -85,10 +85,9 @@ jobs:
                   f'https://github.com/{repo}/actions',
               )
 
-              workflow = urllib.parse.quote('transcribe.yml', safe='')
               runs_url = (
-                  f'https://api.github.com/repos/{repo}/actions/workflows/{workflow}/runs'
-                  f'?event=push&head_sha={urllib.parse.quote(sha)}&per_page=10'
+                  f'https://api.github.com/repos/{repo}/actions/runs'
+                  f'?event=push&head_sha={urllib.parse.quote(sha)}&per_page=100'
               )
               deadline = time.monotonic() + 20000
               target = None
@@ -96,7 +95,12 @@ jobs:
                   runs = api_json(runs_url).get('workflow_runs') or []
                   matches = [
                       item for item in runs
-                      if item.get('head_sha') == sha and item.get('event') == 'push'
+                      if item.get('head_sha') == sha
+                      and item.get('event') == 'push'
+                      and (
+                          item.get('name') == 'Transcribe Public Source'
+                          or str(item.get('path') or '').endswith('/transcribe.yml')
+                      )
                   ]
                   if matches:
                       target = max(
@@ -129,10 +133,13 @@ jobs:
                   )
               artifact_id = str(matches[0]['id'])
 
+              artifact_url = (
+                  f'https://github.com/{repo}/actions/runs/{run_id}/artifacts/{artifact_id}'
+              )
               publish_status(
                   'success',
                   f'run={run_id} artifact={artifact_id} request={request_id}',
-                  run_url,
+                  artifact_url,
               )
               print(json.dumps({
                   'request_id': request_id,
@@ -142,9 +149,11 @@ jobs:
                   'artifact_name': artifact_name,
               }, indent=2))
           except Exception as exc:
+              error_text = urllib.parse.quote(str(exc)[:120], safe='')
               target_url = (
-                  f'https://github.com/{repo}/actions/runs/{run_id}' if run_id
-                  else f'https://github.com/{repo}/actions'
+                  f'https://github.com/{repo}/actions/runs/{run_id}?readback_error={error_text}'
+                  if run_id
+                  else f'https://github.com/{repo}/actions?readback_error={error_text}'
               )
               try:
                   publish_status(
