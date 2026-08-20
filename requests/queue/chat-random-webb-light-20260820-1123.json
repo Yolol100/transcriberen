@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "request_id": "chat-random-webb-light-20260820-1123",
+  "owner": "webactueel-workflow",
+  "project_id": "project-transcriberen",
+  "url": "https://svs.gsfc.nasa.gov/15014",
+  "mode": "media",
+  "language": "en",
+  "allow_audio_fallback": false,
+  "audio_access_authorized": false,
+  "analysis_content_allowed": false,
+  "reuse_allowed": false,
+  "rights_basis": "analysis-paraphrase-only",
+  "public_request_acknowledged": true,
+  "source_context": {
+    "project_id": "project-transcriberen",
+    "source_set_version": "2.0.0-audit-hardening"
+  }
+}
