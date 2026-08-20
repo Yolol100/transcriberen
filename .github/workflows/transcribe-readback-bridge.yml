@@ -1,0 +1,158 @@
+name: Transcribe Readback Bridge
+
+on:
+  push:
+    branches: [runtime-requests]
+    paths:
+      - 'requests/queue/*.json'
+
+permissions:
+  actions: read
+  contents: read
+  statuses: write
+
+jobs:
+  readback:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    steps:
+      - name: Correlate transcription run and publish artifact ID
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TARGET_SHA: ${{ github.sha }}
+          ADDED_FILES_JSON: ${{ toJson(github.event.head_commit.added) }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+          import time
+          import urllib.parse
+          import urllib.request
+
+          repo = os.environ['REPOSITORY']
+          sha = os.environ['TARGET_SHA']
+          token = os.environ['GH_TOKEN']
+          run_id = ''
+          request_id = 'unknown'
+
+          headers = {
+              'Accept': 'application/vnd.github+json',
+              'Authorization': f'Bearer {token}',
+              'X-GitHub-Api-Version': '2026-03-10',
+          }
+
+          def api_json(url):
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  return json.load(response)
+
+          def publish_status(state, description, target_url):
+              url = f'https://api.github.com/repos/{repo}/statuses/{sha}'
+              payload = json.dumps({
+                  'state': state,
+                  'context': 'transcriberen/readback',
+                  'description': description[:140],
+                  'target_url': target_url,
+              }).encode()
+              req = urllib.request.Request(
+                  url,
+                  data=payload,
+                  method='POST',
+                  headers={**headers, 'Content-Type': 'application/json'},
+              )
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  if response.status != 201:
+                      raise RuntimeError(f'unexpected commit-status response: {response.status}')
+
+          try:
+              added = json.loads(os.environ.get('ADDED_FILES_JSON') or '[]')
+              accepted = [
+                  path for path in added
+                  if re.fullmatch(r'requests/queue/[A-Za-z0-9][A-Za-z0-9._-]{2,79}\.json', str(path))
+              ]
+              if len(accepted) != 1 or len(added) != 1:
+                  raise RuntimeError(f'expected exactly one added queue request, got {added!r}')
+              request_id = pathlib.PurePosixPath(accepted[0]).stem
+
+              publish_status(
+                  'pending',
+                  f'waiting for transcription artifact request={request_id}',
+                  f'https://github.com/{repo}/actions',
+              )
+
+              workflow = urllib.parse.quote('transcribe.yml', safe='')
+              runs_url = (
+                  f'https://api.github.com/repos/{repo}/actions/workflows/{workflow}/runs'
+                  f'?event=push&head_sha={urllib.parse.quote(sha)}&per_page=10'
+              )
+              deadline = time.monotonic() + 20000
+              target = None
+              while time.monotonic() < deadline:
+                  runs = api_json(runs_url).get('workflow_runs') or []
+                  matches = [
+                      item for item in runs
+                      if item.get('head_sha') == sha and item.get('event') == 'push'
+                  ]
+                  if matches:
+                      target = max(
+                          matches,
+                          key=lambda item: (item.get('run_attempt') or 0, item.get('id') or 0),
+                      )
+                      run_id = str(target.get('id') or '')
+                      if target.get('status') == 'completed':
+                          break
+                  time.sleep(15)
+              else:
+                  raise RuntimeError('timed out waiting for matching transcription run')
+
+              conclusion = str(target.get('conclusion') or 'unknown')
+              run_url = f'https://github.com/{repo}/actions/runs/{run_id}'
+              if conclusion != 'success':
+                  raise RuntimeError(f'transcription run={run_id} conclusion={conclusion}')
+
+              artifact_name = f'transcription-result-{request_id}'
+              artifacts = api_json(
+                  f'https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100'
+              ).get('artifacts') or []
+              matches = [
+                  item for item in artifacts
+                  if item.get('name') == artifact_name and not item.get('expired')
+              ]
+              if len(matches) != 1:
+                  raise RuntimeError(
+                      f'run={run_id} expected one live artifact {artifact_name!r}, got {len(matches)}'
+                  )
+              artifact_id = str(matches[0]['id'])
+
+              publish_status(
+                  'success',
+                  f'run={run_id} artifact={artifact_id} request={request_id}',
+                  run_url,
+              )
+              print(json.dumps({
+                  'request_id': request_id,
+                  'head_sha': sha,
+                  'run_id': run_id,
+                  'artifact_id': artifact_id,
+                  'artifact_name': artifact_name,
+              }, indent=2))
+          except Exception as exc:
+              target_url = (
+                  f'https://github.com/{repo}/actions/runs/{run_id}' if run_id
+                  else f'https://github.com/{repo}/actions'
+              )
+              try:
+                  publish_status(
+                      'failure',
+                      f'readback failed request={request_id}: {exc}',
+                      target_url,
+                  )
+              except Exception as status_exc:
+                  print(f'failed to publish failure status: {status_exc}')
+              raise
+          PY
