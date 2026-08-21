@@ -12,6 +12,7 @@ class PublishCIStatusTests(unittest.TestCase):
     def test_result_mapping(self):
         self.assertEqual(publish_ci_status.normalize_result("success"), "success")
         self.assertEqual(publish_ci_status.normalize_result("failure"), "failure")
+        self.assertEqual(publish_ci_status.normalize_result("pending"), "pending")
         self.assertEqual(publish_ci_status.normalize_result("cancelled"), "error")
         self.assertEqual(publish_ci_status.normalize_result("skipped"), "error")
 
