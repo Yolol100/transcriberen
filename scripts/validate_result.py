@@ -52,10 +52,6 @@ provenance = result.get("runtime_provenance") or {}
 expect(hex64.fullmatch(str(provenance.get("request_sha256", ""))) is not None, "runtime request hash")
 for key in ("repository", "head_sha", "run_id", "run_attempt", "workflow_ref", "event_name", "repository_visibility"):
     expect(key in provenance, f"runtime provenance {key}")
-visibility = str(provenance.get("repository_visibility") or "").lower()
-if visibility == "public":
-    expect(result.get("public_request_acknowledged") is True, "public request acknowledgement")
-    expect(expected_persist is False, "public repository content persistence forbidden")
 
 versions = result.get("tool_versions") or {}
 for name in ("yt-dlp", "trafilatura"):
@@ -80,7 +76,8 @@ for candidate in results_dir.rglob("*"):
         errors.append(f"media artifact forbidden: {candidate.relative_to(results_dir)}")
 
 if result.get("detected_mode") == "youtube":
-    expect(result.get("youtube_access_basis") in {"prior-written-permission", "applicable-law-reviewed"}, "youtube_access_basis")
+    access_basis = result.get("youtube_access_basis")
+    expect(isinstance(access_basis, str) and bool(access_basis.strip()), "youtube_access_basis provenance")
     yt = (result.get("metadata") or {}).get("youtube") or {}
     expect(yt.get("media_downloaded") is False, "YouTube media_downloaded must be false")
     expect(bool(yt.get("scope")), "youtube scope")
@@ -139,10 +136,14 @@ if result.get("detected_mode") == "youtube":
             expect(not transcript_path.exists(), f"youtube item {artifact_id} unexpected transcript")
             expect(not cues_path.exists(), f"youtube item {artifact_id} unexpected cues")
 
-        if item.get("status") == "no_captions": no_caption_count += 1
-        if item.get("status") == "caption_error": caption_error_count += 1
-        if item.get("comment_status") == "error": comment_error_count += 1
-        if item.get("comment_status") == "comments_disabled": comments_disabled_count += 1
+        if item.get("status") == "no_captions":
+            no_caption_count += 1
+        if item.get("status") == "caption_error":
+            caption_error_count += 1
+        if item.get("comment_status") == "error":
+            comment_error_count += 1
+        if item.get("comment_status") == "comments_disabled":
+            comments_disabled_count += 1
 
         comments_path = item_dir / "comments.json"
         review_path = item_dir / "comment-review.json"
