@@ -12,14 +12,23 @@ Controlled runtime voor Project Transcriberen. De repository verzamelt bronbewij
 
 ## Invocation
 
-De runtime ondersteunt vier uitvoerroutes met hetzelfde requestcontract:
+De runtime ondersteunt vijf uitvoerroutes met hetzelfde requestcontract:
 
-1. `workflow_dispatch` voor handmatige/debug-runs;
-2. een immutable JSON-request op branch `runtime-requests` onder `requests/queue/<request_id>.json` voor automatische Chat/connector-routing;
+1. `workflow_dispatch` voor handmatige/debug-runs op de GitHub-hosted lane;
+2. een immutable JSON-request op branch `runtime-requests` onder `requests/queue/<request_id>.json` voor automatische Chat/connector-routing via GitHub-hosted runners;
 3. `workflow_call` voor gecontroleerde repo-to-repo workflows;
-4. lokale/private uitvoering wanneer dat operationeel handiger is.
+4. een immutable JSON-request op branch `runtime-requests-selfhosted` voor dezelfde gecontroleerde runtime via een dedicated self-hosted Linux x64 runner met label `webactueel-transcribe`;
+5. lokale/private uitvoering wanneer dat operationeel handiger is.
 
-Requestbestanden voor de queue zijn append-only: de bestandsnaam moet gelijk zijn aan `request_id`, een run accepteert precies één nieuw JSON-bestand en live requeststate wordt nooit naar `main` gemerged. De runtime blijft een evidence-adapter; `webactueel-workflow` houdt workflow- en kenniseigenaarschap.
+Requestbestanden voor beide queuebranches zijn append-only: de bestandsnaam moet gelijk zijn aan `request_id`, een run accepteert precies één nieuw JSON-bestand en live requeststate wordt nooit naar `main` gemerged. De runtime blijft een evidence-adapter; `webactueel-workflow` houdt workflow- en kenniseigenaarschap.
+
+### Dedicated self-hosted GitHub Actions-uitvoering
+
+Gebruik `runtime-requests-selfhosted` alleen wanneer een dedicated Linux x64 GitHub Actions runner met custom label `webactueel-transcribe` aan deze repository is gekoppeld. De GitHub-hosted `resolve`-job valideert eerst de append-only requesttransport; pas daarna kan de self-hosted runtimejob starten. Die runtimejob checkt nooit de transportbranch uit maar uitsluitend `Yolol100/transcriberen@main`, met persisted credentials uitgeschakeld.
+
+De self-hosted workflow heeft bewust geen `pull_request`, `pull_request_target` of generieke `workflow_call` trigger. Dit is extra belangrijk omdat de repository publiek is en een persistent self-hosted systeem geen schone ephemeral VM garandeert. Gebruik daarom een dedicated host zonder persoonlijke browserprofielen, SSH/cloudcredentials of andere projectsecrets. Volledige setup- en rollbackinstructies staan in `docs/SELF-HOSTED-RUNNER.md`.
+
+De source-acquisitiegrenzen veranderen niet: geen cookies, account, proxy, CAPTCHA/PO-token-bypass of YouTube-media. Het enige doel van deze lane is dezelfde runtime vanaf een normale hostnetwerkverbinding te laten uitvoeren wanneer GitHub-hosted cloud-egress door YouTube wordt geblokkeerd.
 
 ### Lokale/private YouTube-uitvoering
 
@@ -117,6 +126,7 @@ De runtime levert `results/result.json` en, voor YouTube, `youtube-index.json` p
 
 - GitHub Actions zijn op immutable commit-SHA's gepind.
 - De repo-native InnerTube-adapter gebruikt alleen Python-stdlib, directe HTTPS, een publiek YouTube-clientprofiel en begrensde responses; omgeving-proxies en externe redirects worden expliciet geweigerd.
+- De self-hosted lane gebruikt een dedicated Linux x64 runnerlabel, valideert queue-input eerst op GitHub-hosted infrastructuur en voert alleen de vertrouwde `main` checkout uit op de self-hosted host.
 - yt-dlp gebruikt een expliciet gereviewde nightly-tag met een in de repository vastgelegde SHA-256; er is geen onbegrensde runtime-auto-update.
 - Deno, Whisper en het Whisper-model zijn eveneens versie-/digestgebonden; Python productie-installatie gebruikt een volledig gehashte wheel-lock.
 - PR's krijgen GitHub Dependency Review; de lock krijgt daarnaast pip-audit.
@@ -127,4 +137,4 @@ Een groene runtime is nog geen projectwaarheid. Alleen `webactueel-workflow` mag
 
 ## Repository governance
 
-Generieke runtimecode en contracten staan op `main`. Handmatige runs gebruiken `workflow_dispatch`; geautomatiseerde Chat/connector-requests gebruiken uitsluitend de operationele branch `runtime-requests`; repo-to-repo gebruik mag via `workflow_call`. Live requeststate en target-specifieke source-sets worden niet naar `main` gemerged. Required branch controls are documented in `.github/REPOSITORY-GOVERNANCE.md`.
+Generieke runtimecode en contracten staan op `main`. Normale geautomatiseerde Chat/connector-requests gebruiken `runtime-requests`; de dedicated direct-network lane gebruikt uitsluitend `runtime-requests-selfhosted`. Beide transportbranches zijn append-only en mogen alleen nieuwe `requests/queue/*.json` toevoegen. Handmatige hosted runs gebruiken `workflow_dispatch`; repo-to-repo gebruik mag via `workflow_call`. Live requeststate en target-specifieke source-sets worden niet naar `main` gemerged. Required branch and self-hosted controls are documented in `.github/REPOSITORY-GOVERNANCE.md`.
