@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Caption-first InnerTube client profiles for public YouTube videos/Shorts.
+"""Caption-first public routes for YouTube videos/Shorts.
 
-This module only changes which anonymous public player clients/endpoints are
-tried for caption discovery. It does not add cookies, login state, proxying,
-PO tokens, media download, or browser/TLS impersonation.
+The simple public path can use Google's timedtext caption endpoint directly;
+when richer metadata is available it prefers anonymous InnerTube player clients.
+No cookies, login state, proxying, PO tokens, media download, or browser/TLS
+impersonation are introduced here.
 """
 from __future__ import annotations
 
 import urllib.parse
+import xml.etree.ElementTree as ET
 
+TIMEDTEXT_ENDPOINT = "https://video.google.com/timedtext"
 PLAYER_ENDPOINTS = (
     "https://youtubei.googleapis.com/youtubei/v1/player?prettyPrint=false",
     "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
@@ -72,17 +75,106 @@ def _with_public_key(endpoint: str, api_key: str) -> str:
     )
 
 
+def _timedtext_url(video_id: str, *, track=None) -> str:
+    query = [("v", video_id)]
+    if track is None:
+        query.append(("type", "list"))
+    else:
+        query.append(("type", "track"))
+        language = str(track.get("lang_code") or "").strip()
+        if language:
+            query.append(("lang", language))
+        name = str(track.get("name") or "").strip()
+        if name:
+            query.append(("name", name))
+        track_id = str(track.get("id") or "").strip()
+        if track_id:
+            query.append(("id", track_id))
+    return TIMEDTEXT_ENDPOINT + "?" + urllib.parse.urlencode(query)
+
+
+def _parse_track_list(runtime, raw: bytes):
+    if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
+        raise runtime.InnerTubeError("timedtext XML DTD/entity declarations are forbidden")
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        raise runtime.InnerTubeError(f"invalid timedtext track list: {exc}") from exc
+    tracks = []
+    for elem in root.iter():
+        if str(elem.tag).split("}")[-1] != "track":
+            continue
+        language = str(elem.attrib.get("lang_code") or "").strip()
+        if not language:
+            continue
+        name = str(elem.attrib.get("name") or "").strip()
+        raw_kind = str(elem.attrib.get("kind") or "").strip().lower()
+        automatic = (
+            raw_kind == "asr"
+            or "automatic" in name.casefold()
+            or "auto-generated" in name.casefold()
+        )
+        tracks.append({
+            "id": str(elem.attrib.get("id") or "").strip(),
+            "name": name,
+            "lang_code": language,
+            "kind": "automatic" if automatic else "manual",
+        })
+    return tracks
+
+
+def timedtext_metadata(runtime, url: str):
+    """Get minimal caption metadata without loading a YouTube player response."""
+    video_id = runtime.video_id_from_url(url)
+    raw, status = runtime._request_bytes(_timedtext_url(video_id), client_name="WEB")
+    if status != 200:
+        raise runtime.InnerTubeError(f"timedtext list returned HTTP {status}")
+    tracks = _parse_track_list(runtime, raw)
+    if not tracks:
+        raise runtime.InnerTubeUnsupported("timedtext returned no public caption tracks")
+    manual, automatic = {}, {}
+    for track in tracks:
+        entry = {
+            "url": _timedtext_url(video_id, track=track),
+            "name": track["name"],
+            "ext": "srv1",
+            "_innertube_client": "WEB",
+            "_innertube_kind": track["kind"],
+            "_timedtext_direct": True,
+        }
+        target = automatic if track["kind"] == "automatic" else manual
+        target.setdefault(track["lang_code"], []).append(entry)
+    runtime._record("timedtext-list", "WEB", "success", f"tracks:{len(tracks)}")
+    return {
+        "id": video_id,
+        "webpage_url": f"https://www.youtube.com/watch?v={video_id}",
+        "original_url": str(url),
+        "availability": "public",
+        "subtitles": manual,
+        "automatic_captions": automatic,
+        "_timedtext_direct": True,
+    }
+
+
 def apply(runtime) -> None:
     """Install the caption-first anonymous client cascade on innertube_runtime."""
     runtime.CLIENTS.update({name: dict(cfg) for name, cfg in PLAYER_CLIENTS.items()})
     runtime.PLAYER_CLIENT_ORDER = PLAYER_CLIENT_ORDER
+    runtime.YOUTUBE_HOSTS.add("video.google.com")
 
 
 def metadata_for(runtime, url: str, *, include_engagement: bool = False):
-    """Try public player hosts in order while keeping the existing metadata shape."""
+    """Try direct timedtext plus public player hosts without weakening rich metadata."""
     apply(runtime)
-    original_endpoint = runtime.PLAYER_ENDPOINT
+    direct_meta = None
     errors = []
+    try:
+        direct_meta = timedtext_metadata(runtime, url)
+    except Exception as exc:
+        errors.append(f"video.google.com: {exc}")
+        runtime._record("timedtext-list", "WEB", "error", exc)
+
+    original_endpoint = runtime.PLAYER_ENDPOINT
     try:
         for endpoint in PLAYER_ENDPOINTS:
             runtime.PLAYER_ENDPOINT = _with_public_key(endpoint, runtime.WEB_API_KEY)
@@ -92,4 +184,7 @@ def metadata_for(runtime, url: str, *, include_engagement: bool = False):
                 errors.append(f"{urllib.parse.urlsplit(endpoint).hostname}: {exc}")
     finally:
         runtime.PLAYER_ENDPOINT = original_endpoint
-    raise runtime.InnerTubeError("; ".join(errors) or "caption player endpoint fallback exhausted")
+
+    if direct_meta is not None:
+        return direct_meta
+    raise runtime.InnerTubeError("; ".join(errors) or "caption provider fallback exhausted")
