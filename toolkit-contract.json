@@ -12,8 +12,9 @@
   "tools": [
     {
       "id": "yt-dlp",
-      "version": "2026.07.04",
-      "sha256": "495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd",
+      "version": "2026.08.20.234504",
+      "sha256": "8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93",
+      "release_channel": "nightly",
       "trigger_when": "public YouTube discovery/captions/comments; public media metadata/subtitles; or authorized non-YouTube extraction",
       "outputs": ["YouTube discovery candidates", "selected captions", "public comments", "normalized metadata", "temporary authorized non-YouTube audio"]
     },
@@ -72,6 +73,7 @@
     "An upstream public-YouTube anti-bot/access denial is reported as access_blocked evidence; the runtime does not answer it by enabling cookies, login, proxying or media fallback.",
     "Public YouTube is captions, metadata and optional public comments only; audio/video download and Whisper fallback are blocked.",
     "Public GitHub runs may persist bounded task-scoped transcript/comment analysis artifacts when analysis_content_allowed=true; this does not authorize republication or reuse.",
+    "The yt-dlp extractor uses an explicitly reviewed nightly release pin and verified SHA-256 so fast-moving YouTube compatibility fixes do not require an unpinned runtime auto-update.",
     "Automatic YouTube caption choice is English, then Dutch, then the first other available language; manual captions beat automatic captions within the same language.",
     "Auto-translated YouTube caption variants are rejected using yt-dlp translated_subs skipping plus a local tlang URL guard for known metadata edge cases.",
     "WebVTT/SRT normalization strips metadata, timestamps and markup and collapses rolling auto-caption overlap before analysis.",
