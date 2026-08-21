@@ -58,7 +58,6 @@ def yt_base() -> list[str]:
         str(BIN / "yt-dlp"),
         "--no-config",
         "--no-cookies",
-        "--no-warnings",
         "--skip-download",
         "--no-playlist",
         "--retries",
@@ -81,8 +80,11 @@ def classify_failure(message: str) -> str:
 
 def load_metadata(url: str) -> dict:
     completed = run([*yt_base(), "--dump-single-json", url])
+    diagnostic = completed.stderr[-2000:]
+    if diagnostic and classify_failure(diagnostic) == "access_blocked":
+        raise RuntimeError(f"access_blocked::{diagnostic}")
     if completed.returncode != 0 or not completed.stdout.strip():
-        detail = completed.stderr[-2000:] or "yt-dlp returned no metadata"
+        detail = diagnostic or "yt-dlp returned no metadata"
         raise RuntimeError(f"{classify_failure(detail)}::{detail}")
     try:
         data = json.loads(completed.stdout)
@@ -127,23 +129,34 @@ def choose_caption_track(meta: dict, preferred_language: str = "auto") -> dict |
         return None
 
     preferred = str(preferred_language or "auto").strip().lower()
-    priorities: list[str] = []
+    kinds = (("manual", manual), ("automatic", automatic))
+
     if preferred != "auto":
-        priorities.append(language_family(preferred))
+        # Exact requested language beats a broader family match. Manual still wins
+        # over automatic when both have the same exact language code.
+        for kind, codes in kinds:
+            exact = next((code for code in codes if code.casefold() == preferred.casefold()), None)
+            if exact:
+                return {"language": exact, "kind": kind}
+
+        preferred_family = language_family(preferred)
+        for kind, codes in kinds:
+            family_match = next((code for code in codes if language_family(code) == preferred_family), None)
+            if family_match:
+                return {"language": family_match, "kind": kind}
+
+    priorities: list[str] = []
     for family in ("en", "nl"):
-        if family not in priorities:
+        if preferred == "auto" or family != language_family(preferred):
             priorities.append(family)
 
     for family in priorities:
-        for kind, codes in (("manual", manual), ("automatic", automatic)):
-            exact = next((code for code in codes if code.casefold() == preferred.casefold()), None)
-            if preferred != "auto" and exact:
-                return {"language": exact, "kind": kind}
+        for kind, codes in kinds:
             family_match = next((code for code in codes if language_family(code) == family), None)
             if family_match:
                 return {"language": family_match, "kind": kind}
 
-    for kind, codes in (("manual", manual), ("automatic", automatic)):
+    for kind, codes in kinds:
         if codes:
             return {"language": codes[0], "kind": kind}
     return None
@@ -266,6 +279,14 @@ def yt_dlp_version() -> str:
     return completed.stdout.strip() if completed.returncode == 0 else "unknown"
 
 
+def deno_version() -> str:
+    completed = run([str(BIN / "deno"), "--version"], timeout=30)
+    if completed.returncode != 0:
+        return "unknown"
+    first = completed.stdout.splitlines()[0].strip() if completed.stdout else ""
+    return first.removeprefix("deno ").strip() or "unknown"
+
+
 def runtime_provenance() -> dict:
     return {
         "repository": os.environ.get("GITHUB_REPOSITORY", "Yolol100/transcriberen"),
@@ -276,6 +297,7 @@ def runtime_provenance() -> dict:
         "event": os.environ.get("GITHUB_EVENT_NAME", "local"),
         "execution_target": os.environ.get("TRANSCRIBE_EXECUTION_TARGET", "local"),
         "yt_dlp_version": yt_dlp_version(),
+        "deno_version": deno_version(),
     }
 
 
