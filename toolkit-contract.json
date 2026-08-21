@@ -1,161 +1,40 @@
 {
-  "schema_version": "1.2",
+  "schema_version": "2.0",
   "owner_skill": "webactueel-workflow",
   "owner_mode": "transcribeer",
   "project_id": "project-transcriberen",
   "repository": "Yolol100/transcriberen",
-  "source_set_version": "2.1.0-public-analysis",
-  "evidence_role": "controlled_runtime_public_source_discovery_caption_comment_acquisition_and_transcription",
+  "source_set_version": "2.2.0-captions-only",
+  "evidence_role": "controlled_runtime_public_youtube_caption_acquisition",
   "requires_account": false,
   "requires_api_key": false,
   "requires_mcp": false,
+  "runtime_target": "self-hosted-or-local-direct-network",
+  "inputs": ["youtube-video-url", "youtube-short-url", "optional-language"],
+  "outputs": ["result.json", "transcript.txt when captions exist", "SHA256SUMS.txt"],
   "tools": [
-    {
-      "id": "innertube-public-adapter",
-      "version": "repo",
-      "trigger_when": "public YouTube video metadata/captions or bounded top-level comments are requested before yt-dlp fallback",
-      "outputs": [
-        "public video metadata",
-        "selected signed captions",
-        "bounded top-level comments",
-        "per-client provider diagnostics"
-      ]
-    },
     {
       "id": "yt-dlp",
       "version": "2026.08.20.234504",
-      "sha256": "8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93",
       "release_channel": "nightly",
-      "trigger_when": "public YouTube discovery/captions/comments; public media metadata/subtitles; or authorized non-YouTube extraction",
-      "outputs": [
-        "YouTube discovery candidates",
-        "selected captions",
-        "public comments",
-        "normalized metadata",
-        "temporary authorized non-YouTube audio"
-      ]
+      "provisioning": "dedicated-runner prerequisite",
+      "purpose": "discover and download one public caption track without media"
     },
     {
       "id": "deno-ejs-runtime",
       "version": "2.9.5",
-      "sha256": "8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530",
-      "trigger_when": "yt-dlp requires local EJS challenge execution",
-      "outputs": [
-        "local restricted-permission JavaScript challenge execution"
-      ]
-    },
-    {
-      "id": "ffmpeg",
-      "version": "runner-recorded",
-      "trigger_when": "explicitly authorized non-YouTube audio normalization is needed",
-      "outputs": [
-        "temporary 16 kHz mono WAV and media metadata"
-      ]
-    },
-    {
-      "id": "whisper.cpp",
-      "version": "v1.9.2",
-      "sha256": "46811a3ecf584307480a220b9ef5ff81b7b22dc41577cbc274ce3afc61f753b1",
-      "trigger_when": "authorized non-YouTube audio has no usable subtitles and both audio fallback gates are true",
-      "outputs": [
-        "local transcript"
-      ]
-    },
-    {
-      "id": "whisper-base-model",
-      "version": "hf-5359861c739e955e79d9a303bcbc70fb988958b1",
-      "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
-      "trigger_when": "authorized whisper.cpp audio fallback is enabled",
-      "outputs": [
-        "local model runtime only"
-      ]
-    },
-    {
-      "id": "trafilatura",
-      "version": "2.1.0",
-      "trigger_when": "article/html extraction is needed",
-      "outputs": [
-        "normalized article text"
-      ]
-    },
-    {
-      "id": "python-source-parser",
-      "version": "repo",
-      "trigger_when": "RSS/Atom/sitemap parsing, YouTube result normalization/ranking/selection, comment review ranking or provenance validation is needed",
-      "outputs": [
-        "normalized discovered links",
-        "YouTube selection/index",
-        "comment review candidates",
-        "provenance"
-      ]
-    }
-  ],
-  "usage_assertions": [
-    {
-      "tool": "innertube-public-adapter",
-      "path": "scripts/innertube_runtime.py",
-      "contains": "PLAYER_CLIENT_ORDER"
-    },
-    {
-      "tool": "yt-dlp",
-      "path": "scripts/install_tools.sh",
-      "contains": "YT_DLP_SHA256"
-    },
-    {
-      "tool": "deno-ejs-runtime",
-      "path": "scripts/install_tools.sh",
-      "contains": "DENO_SHA256"
-    },
-    {
-      "tool": "ffmpeg",
-      "path": "scripts/runtime.py",
-      "contains": "ffmpeg"
-    },
-    {
-      "tool": "whisper.cpp",
-      "path": "scripts/install_tools.sh",
-      "contains": "WHISPER_SHA256"
-    },
-    {
-      "tool": "whisper-base-model",
-      "path": "scripts/install_tools.sh",
-      "contains": "WHISPER_MODEL_SHA256"
-    },
-    {
-      "tool": "trafilatura",
-      "path": "requirements.lock",
-      "contains": "trafilatura==2.1.0"
-    },
-    {
-      "tool": "python-source-parser",
-      "path": "scripts/youtube_runtime.py",
-      "contains": "rank_comment_candidates"
+      "provisioning": "dedicated-runner prerequisite",
+      "purpose": "JavaScript challenge runtime used by yt-dlp"
     }
   ],
   "boundaries": [
-    "Only public HTTP(S) sources and accountless public YouTube discovery; no login, cookie, credential, DRM, paywall, CAPTCHA or age-control bypass.",
-    "Public YouTube captions, metadata and public comments may be collected anonymously without a separate prior-written-permission or applicable-law execution attestation; a supplied access-basis value is provenance metadata only.",
-    "An upstream public-YouTube anti-bot/access denial is reported as access_blocked evidence; the runtime does not answer it by enabling cookies, login, proxying or media fallback.",
-    "Public YouTube is captions, metadata and optional public comments only; audio/video download and Whisper fallback are blocked.",
-    "Public GitHub runs may persist bounded task-scoped transcript/comment analysis artifacts when analysis_content_allowed=true; this does not authorize republication or reuse.",
-    "The repo-native public InnerTube adapter tries direct Android then iOS player clients and WEB next for bounded top-level comments; it uses no cookies, login, environment proxy, browser/TLS fingerprint impersonation, PO token or media endpoint.",
-    "The WEB next route uses only public YouTube client configuration and never requires a user-supplied API key or secret; requires_api_key=false therefore remains true.",
-    "InnerTube metadata is accepted for filtered/ranked requests only when the fields required by that request are present; otherwise the reviewed yt-dlp cascade is used to avoid silently weakening selection semantics.",
-    "The yt-dlp extractor uses an explicitly reviewed nightly release pin and verified SHA-256 so fast-moving YouTube compatibility fixes do not require an unpinned runtime auto-update.",
-    "Automatic YouTube caption choice is English, then Dutch, then the first other available language; manual captions beat automatic captions within the same language.",
-    "Auto-translated YouTube caption variants are rejected using yt-dlp translated_subs skipping plus a local tlang URL guard for known metadata edge cases.",
-    "WebVTT/SRT normalization strips metadata, timestamps and markup and collapses rolling auto-caption overlap before analysis.",
-    "channel_all combines the public videos, shorts and streams tabs and deduplicates overlapping video IDs before selection; channel_streams is also directly addressable.",
-    "YouTube rankings and random selection are relative to the fetched candidate set and must not be presented as global coverage of all YouTube.",
-    "sort_by=random uses request_id as a reproducible pseudo-random seed so identical requests are auditable while new request IDs can produce a new draw.",
-    "Bounded YouTube work has explicit item, scan, per-item comment and total comment budgets; larger requests require explicit allow_unbounded and still remain under hard runtime caps.",
-    "max_comments=all is best-effort for comments exposed to yt-dlp/YouTube, is limited to at most five selected items, and never proves global comment completeness.",
-    "Persisted public-comment evidence minimizes direct commenter identity fields and redacts obvious email, phone, URL and handle patterns before persistence; remaining text is still untrusted task-scoped evidence.",
-    "Knowledge-oriented comment ranking is candidate triage only: it uses explainable engagement/creator/pinned/keyword signals and never promotes a comment to project truth without semantic owner review.",
-    "Every executed request must exactly match this toolkit-contract source_set_version; placeholders and stale concrete versions are rejected.",
-    "analysis_content_allowed permits task-scoped analysis/paraphrase artifacts and does not imply reuse rights; reuse_allowed remains separately gated by rights_basis.",
-    "Non-YouTube Whisper fallback requires allow_audio_fallback=true, audio_access_authorized=true and a concrete authorization/rights_basis.",
-    "Raw source content is never automatically project truth; webactueel-workflow owns quality, currentness, deduplication and knowledge promotion.",
-    "All output is at most controlled_runtime evidence."
+    "Only direct public YouTube video and Short URLs are accepted.",
+    "Exactly one real caption track is selected; English then Dutch then another language, with manual before automatic within a language.",
+    "If no caption track exists, the request succeeds with status skipped_no_captions and no transcript file.",
+    "The acquisition job runs only on a dedicated self-hosted Linux x64 runner or through scripts/run_local.sh on a normal direct network connection.",
+    "No comments, channel or playlist discovery, search, ranking, topic filtering, engagement data, knowledge handoff, article/feed/sitemap extraction, audio fallback or Whisper exists in this runtime.",
+    "No cookies, login, proxy, CAPTCHA bypass, PO token or media download is used.",
+    "Only minimal caption provenance is persisted; raw yt-dlp metadata is not persisted.",
+    "All output is controlled_runtime evidence."
   ]
 }

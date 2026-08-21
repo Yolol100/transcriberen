@@ -1,186 +1,98 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import hashlib
 import json
 import re
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
-path = Path(sys.argv[1] if len(sys.argv) > 1 else "results/result.json")
-results_dir = path.parent
-result = json.loads(path.read_text(encoding="utf-8"))
-contract = json.loads((ROOT / "toolkit-contract.json").read_text(encoding="utf-8"))
-errors = []
-hex64 = re.compile(r"^[0-9a-f]{64}$")
+RESULTS = ROOT / "results"
+VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+ALLOWED_STATUSES = {"ok", "skipped_no_captions", "access_blocked", "error"}
 MEDIA_EXTENSIONS = {".mp4", ".webm", ".mkv", ".mov", ".avi", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac"}
-FORBIDDEN_COMMENT_KEYS = {"id", "parent", "author", "author_id", "author_url"}
 
 
-def sha256_bytes(data):
-    return hashlib.sha256(data).hexdigest()
+def contract_version() -> str:
+    contract = json.loads((ROOT / "toolkit-contract.json").read_text(encoding="utf-8"))
+    return str(contract["source_set_version"])
 
 
-def load_json_file(candidate, label):
-    try:
-        return json.loads(candidate.read_text(encoding="utf-8"))
-    except Exception as exc:
-        errors.append(f"{label}: {exc}")
-        return None
+def validate(path: Path) -> None:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("schema_version") != "2.0":
+        raise ValueError("result schema_version must be 2.0")
+    if data.get("status") not in ALLOWED_STATUSES:
+        raise ValueError("invalid result status")
 
+    source = data.get("source") or {}
+    if source.get("type") not in {"video", "short"}:
+        raise ValueError("source.type must be video or short")
+    if not VIDEO_ID_RE.fullmatch(str(source.get("video_id") or "")):
+        raise ValueError("invalid source.video_id")
+    if not str(source.get("url") or "").startswith("https://www.youtube.com/"):
+        raise ValueError("source.url must be normalized YouTube HTTPS")
 
-def expect(condition, label):
-    if not condition:
-        errors.append(label)
+    context = data.get("source_context") or {}
+    if context.get("project_id") != "project-transcriberen":
+        raise ValueError("source_context.project_id mismatch")
+    if context.get("source_set_version") != contract_version():
+        raise ValueError("source_set_version does not match toolkit contract")
+    if data.get("media_downloaded") is not False:
+        raise ValueError("media_downloaded must be false")
 
+    transcript_path = RESULTS / "transcript.txt"
+    status = data["status"]
+    if status == "ok":
+        caption = data.get("caption")
+        if not isinstance(caption, dict):
+            raise ValueError("ok result requires caption metadata")
+        if caption.get("kind") not in {"manual", "automatic"}:
+            raise ValueError("invalid caption.kind")
+        if not caption.get("language") or not caption.get("format"):
+            raise ValueError("caption language and format are required")
+        if int(caption.get("cue_count") or 0) <= 0:
+            raise ValueError("caption cue_count must be positive")
+        if not transcript_path.is_file():
+            raise ValueError("ok result requires transcript.txt")
+        transcript = transcript_path.read_text(encoding="utf-8")
+        if not transcript.strip():
+            raise ValueError("transcript.txt must not be empty")
+        digest = hashlib.sha256(transcript.encode("utf-8")).hexdigest()
+        if data.get("transcript_sha256") != digest:
+            raise ValueError("transcript_sha256 mismatch")
+        if data.get("transcript_chars") != len(transcript):
+            raise ValueError("transcript_chars mismatch")
+        if data.get("error"):
+            raise ValueError("ok result may not contain error")
+    else:
+        if transcript_path.exists():
+            raise ValueError("non-ok result may not contain transcript.txt")
+        if data.get("caption") is not None:
+            raise ValueError("non-ok result must have caption=null")
+        if data.get("transcript_sha256") is not None or data.get("transcript_chars") != 0:
+            raise ValueError("non-ok result must not claim transcript content")
+        if status == "skipped_no_captions" and data.get("error"):
+            raise ValueError("skipped_no_captions may not contain error")
+        if status in {"access_blocked", "error"} and not str(data.get("error") or "").strip():
+            raise ValueError("failed result requires error detail")
 
-expect(result.get("schema_version") == "webactueel-transcription-result/1.1", "schema_version")
-expect(result.get("owner") == "webactueel-workflow", "owner")
-expect(result.get("project_id") == "project-transcriberen", "project_id")
-expect(result.get("evidence_level") == "controlled_runtime", "evidence_level")
-expect(hex64.fullmatch(str(result.get("content_sha256", ""))) is not None, "content_sha256")
-expect(bool(result.get("rights_basis")), "rights_basis")
-for field in ("audio_access_authorized", "analysis_content_allowed", "reuse_allowed", "public_request_acknowledged"):
-    expect(isinstance(result.get(field), bool), field)
-expected_persist = bool(result.get("analysis_content_allowed") or result.get("reuse_allowed"))
-expect(result.get("content_persisted") is expected_persist, "content persistence mismatch")
-expect(result.get("usage_mode") == ("reuse-authorized" if result.get("reuse_allowed") else "analysis-paraphrase-only"), "usage_mode")
-source_context = result.get("source_context") or {}
-expect(source_context.get("project_id") == "project-transcriberen", "source_context project")
-expect(source_context.get("source_set_version") == contract.get("source_set_version"), "source_context current source_set")
-provenance = result.get("runtime_provenance") or {}
-expect(hex64.fullmatch(str(provenance.get("request_sha256", ""))) is not None, "runtime request hash")
-for key in ("repository", "head_sha", "run_id", "run_attempt", "workflow_ref", "event_name", "repository_visibility"):
-    expect(key in provenance, f"runtime provenance {key}")
-
-versions = result.get("tool_versions") or {}
-for name in ("yt-dlp", "trafilatura"):
-    expect(bool(versions.get(name)), f"tool version {name}")
-if result.get("detected_mode") == "whisper":
-    expect(result.get("audio_access_authorized") is True, "whisper authorized audio")
-    host = (urlsplit(str(result.get("source_url") or "")).hostname or "").lower().rstrip(".")
-    expect(not (host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com")), "public YouTube may not use whisper")
-
-content = results_dir / "content.md"
-if expected_persist:
-    expect(content.is_file(), "content.md required")
-    if content.is_file():
-        data = content.read_bytes()
-        expect(sha256_bytes(data) == result.get("content_sha256"), "content.md SHA-256 mismatch")
-        expect(len(data.decode("utf-8", errors="replace")) == int(result.get("content_chars") or -1), "content.md character count mismatch")
-else:
-    expect(not content.exists(), "content.md forbidden")
-
-for candidate in results_dir.rglob("*"):
-    if candidate.is_file() and candidate.suffix.lower() in MEDIA_EXTENSIONS:
-        errors.append(f"media artifact forbidden: {candidate.relative_to(results_dir)}")
-
-if result.get("detected_mode") == "youtube":
-    access_basis = result.get("youtube_access_basis")
-    expect(isinstance(access_basis, str) and bool(access_basis.strip()), "youtube_access_basis provenance")
-    yt = (result.get("metadata") or {}).get("youtube") or {}
-    expect(yt.get("media_downloaded") is False, "YouTube media_downloaded must be false")
-    expect(bool(yt.get("scope")), "youtube scope")
-    index_path = results_dir / "youtube-index.json"
-    expect(index_path.is_file(), "youtube-index.json")
-    index = load_json_file(index_path, "youtube-index.json") if index_path.is_file() else {}
-    index = index or {}
-    expect(index.get("schema_version") == "webactueel-youtube-collection/1.1", "youtube index schema")
-    expect(index.get("scope") == yt.get("scope"), "youtube scope mismatch")
-    expect(index.get("comment_identity_minimized") is True, "youtube comment identity minimization")
-    expect(index.get("comment_text_redaction") == "obvious-direct-identifiers", "youtube comment text redaction")
-    discovery = index.get("discovery") or {}
-    expect(isinstance(discovery.get("possibly_truncated"), bool), "youtube discovery completeness")
-    items = index.get("items") if isinstance(index.get("items"), list) else []
-    if not isinstance(index.get("items"), list):
-        errors.append("youtube items")
-    counts = [index.get(k) for k in ("candidate_count", "eligible_count", "selected_count", "item_count")]
-    expect(all(isinstance(v, int) and v >= 0 for v in counts), "youtube counts")
-    if all(isinstance(v, int) and v >= 0 for v in counts):
-        expect(counts[0] >= counts[1] >= counts[2], "youtube count ordering")
-        expect(counts[2] == counts[3] == len(items), "youtube item count mismatch")
-
-    transcript_count = no_caption_count = caption_error_count = comment_error_count = comments_disabled_count = review_count = 0
-    for pos, item in enumerate(items):
-        if not isinstance(item, dict):
-            errors.append(f"youtube item {pos} invalid")
+    allowed_files = {"result.json", "transcript.txt", "SHA256SUMS.txt"}
+    for item in RESULTS.rglob("*"):
+        if item.is_dir():
             continue
-        artifact_id = str(item.get("artifact_id") or "")
-        if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", artifact_id):
-            errors.append(f"youtube item {pos} artifact_id")
-            continue
-        item_dir = results_dir / "items" / artifact_id
-        meta_path = item_dir / "metadata.json"
-        expect(meta_path.is_file(), f"youtube item {artifact_id} metadata")
-        if meta_path.is_file():
-            stored_meta = load_json_file(meta_path, f"metadata {artifact_id}")
-            expect(stored_meta == item.get("metadata"), f"youtube item {artifact_id} metadata mismatch")
-            if not expected_persist and isinstance(stored_meta, dict):
-                for risky in ("description", "uploader", "uploader_id", "tags", "chapters"):
-                    expect(risky not in stored_meta, f"youtube minimized metadata leaked {risky}")
+        if item.suffix.lower() in MEDIA_EXTENSIONS:
+            raise ValueError(f"media artifact forbidden: {item.name}")
+        if item.relative_to(RESULTS).as_posix() not in allowed_files:
+            raise ValueError(f"unexpected result artifact: {item.relative_to(RESULTS)}")
 
-        transcript_path = item_dir / "transcript.md"
-        cues_path = item_dir / "transcript-cues.json"
-        if item.get("transcript_chars"):
-            transcript_count += 1
-            if expected_persist:
-                expect(transcript_path.is_file(), f"youtube item {artifact_id} transcript missing")
-                expect(cues_path.is_file(), f"youtube item {artifact_id} cue provenance missing")
-                if transcript_path.is_file():
-                    data = transcript_path.read_bytes()
-                    expect(sha256_bytes(data) == item.get("transcript_sha256"), f"youtube item {artifact_id} transcript hash")
-            else:
-                expect(not transcript_path.exists(), f"youtube item {artifact_id} transcript forbidden")
-                expect(not cues_path.exists(), f"youtube item {artifact_id} cues forbidden")
-        else:
-            expect(not transcript_path.exists(), f"youtube item {artifact_id} unexpected transcript")
-            expect(not cues_path.exists(), f"youtube item {artifact_id} unexpected cues")
 
-        if item.get("status") == "no_captions":
-            no_caption_count += 1
-        if item.get("status") == "caption_error":
-            caption_error_count += 1
-        if item.get("comment_status") == "error":
-            comment_error_count += 1
-        if item.get("comment_status") == "comments_disabled":
-            comments_disabled_count += 1
+def main() -> None:
+    target = Path(sys.argv[1] if len(sys.argv) > 1 else RESULTS / "result.json")
+    validate(target)
+    print("result-contract: OK")
 
-        comments_path = item_dir / "comments.json"
-        review_path = item_dir / "comment-review.json"
-        if comments_path.exists():
-            expect(expected_persist, f"youtube item {artifact_id} comments forbidden")
-            comments = load_json_file(comments_path, f"comments {artifact_id}")
-            if isinstance(comments, list):
-                expect(len(comments) == item.get("comments_extracted"), f"youtube item {artifact_id} comments count")
-                for comment in comments:
-                    if isinstance(comment, dict):
-                        expect(not FORBIDDEN_COMMENT_KEYS.intersection(comment), f"youtube item {artifact_id} comment identity field")
-                        expect(comment.get("text_redacted") is True, f"youtube item {artifact_id} comment redaction marker")
-        elif item.get("comments_extracted") and expected_persist:
-            errors.append(f"youtube item {artifact_id} comments missing")
 
-        if review_path.exists():
-            expect(expected_persist, f"youtube item {artifact_id} comment review forbidden")
-            review = load_json_file(review_path, f"comment review {artifact_id}")
-            if isinstance(review, dict):
-                expect(review.get("source_trust") == "untrusted", f"youtube item {artifact_id} comment review trust")
-                candidates = review.get("candidates") if isinstance(review.get("candidates"), list) else []
-                review_count += len(candidates)
-                for candidate in candidates:
-                    expect(candidate.get("untrusted_source_text") is True, f"youtube item {artifact_id} candidate trust marker")
-
-    expected = {
-        "transcript_count": transcript_count,
-        "no_caption_count": no_caption_count,
-        "caption_error_count": caption_error_count,
-        "comment_error_count": comment_error_count,
-        "comments_disabled_count": comments_disabled_count,
-        "comment_review_candidate_count": review_count,
-    }
-    for key, value in expected.items():
-        expect(index.get(key) == value, f"youtube {key} mismatch")
-
-if errors:
-    print("result validation failed: " + ", ".join(errors), file=sys.stderr)
-    raise SystemExit(1)
-print("result contract: OK")
+if __name__ == "__main__":
+    main()
