@@ -75,8 +75,25 @@ class TopicFilterTests(unittest.TestCase):
         }
         self.assertEqual(runtime_topic_filter._topic_aware_playlist_end(req), 7)
 
+    def test_metadata_prefers_innertube_before_ytdlp(self):
+        with patch.object(
+            runtime_topic_filter.innertube_runtime,
+            "metadata_for",
+            return_value={"id": "inner", "view_count": 10},
+        ) as inner, patch.object(runtime_topic_filter, "_ORIGINAL_METADATA_FOR") as ytdlp:
+            result = runtime_topic_filter.metadata_for_with_client_fallback(
+                "https://www.youtube.com/watch?v=video-1"
+            )
+        self.assertEqual(result["id"], "inner")
+        inner.assert_called_once()
+        ytdlp.assert_not_called()
+
     def test_metadata_fallback_tries_default_then_anonymous_client(self):
         with patch.object(
+            runtime_topic_filter.innertube_runtime,
+            "metadata_for",
+            side_effect=RuntimeError("innertube unavailable"),
+        ), patch.object(
             runtime_topic_filter,
             "_ORIGINAL_METADATA_FOR",
             side_effect=[RuntimeError("confirm you're not a bot"), {"id": "video-1"}],
@@ -86,13 +103,71 @@ class TopicFilterTests(unittest.TestCase):
         self.assertEqual(mocked.call_args_list[0].kwargs["player_client"], None)
         self.assertEqual(mocked.call_args_list[1].kwargs["player_client"], "tv")
 
+    def test_metadata_missing_required_engagement_falls_back_to_ytdlp(self):
+        with patch.object(
+            runtime_topic_filter.innertube_runtime,
+            "metadata_for",
+            return_value={"id": "inner", "view_count": 10},
+        ) as inner, patch.object(
+            runtime_topic_filter,
+            "_ORIGINAL_METADATA_FOR",
+            return_value={"id": "yt", "like_count": 4},
+        ) as ytdlp:
+            result = runtime_topic_filter.metadata_for_with_client_fallback(
+                "https://www.youtube.com/watch?v=video-1",
+                youtube_options={"sort_by": "likes"},
+            )
+        self.assertEqual(result["id"], "yt")
+        self.assertTrue(inner.call_args.kwargs["include_engagement"])
+        self.assertEqual(ytdlp.call_args.kwargs["player_client"], None)
+
     def test_explicit_metadata_client_does_not_expand_fallbacks(self):
-        with patch.object(runtime_topic_filter, "_ORIGINAL_METADATA_FOR", return_value={"id": "x"}) as mocked:
+        with patch.object(runtime_topic_filter, "_ORIGINAL_METADATA_FOR", return_value={"id": "x"}) as mocked, \
+             patch.object(runtime_topic_filter.innertube_runtime, "metadata_for") as inner:
             result = runtime_topic_filter.metadata_for_with_client_fallback(
                 "https://www.youtube.com/watch?v=x", player_client="mweb"
             )
         self.assertEqual(result["id"], "x")
         mocked.assert_called_once_with("https://www.youtube.com/watch?v=x", player_client="mweb")
+        inner.assert_not_called()
+
+    def test_caption_prefers_innertube_then_preserves_ytdlp_fallback(self):
+        meta = {
+            "_innertube_player_client": "ANDROID",
+            "automatic_captions": {"en": [{"url": "https://www.youtube.com/api/timedtext?lang=en"}]},
+        }
+        with patch.object(
+            runtime_topic_filter.innertube_runtime,
+            "download_caption",
+            return_value=("Inner text", {"provider": "innertube"}),
+        ), patch.object(runtime_topic_filter, "_ORIGINAL_DOWNLOAD_CAPTION") as ytdlp:
+            text, info = runtime_topic_filter.download_caption_with_provider_fallback(
+                "https://www.youtube.com/watch?v=x", meta
+            )
+        self.assertEqual(text, "Inner text")
+        self.assertEqual(info["provider"], "innertube")
+        ytdlp.assert_not_called()
+
+    def test_comments_prefer_innertube_and_reuse_privacy_normalization(self):
+        req = {
+            "youtube": {
+                "comment_sort": "top",
+                "max_comments": "20",
+                "include_replies": False,
+            }
+        }
+        payload = {
+            "comment_count": 1,
+            "comments": [{"id": "c1", "parent": "root", "text": "Useful SEO observation", "like_count": 2}],
+        }
+        with patch.object(runtime_topic_filter.innertube_runtime, "comments_payload", return_value=payload), \
+             patch.object(runtime_topic_filter, "_ORIGINAL_COMMENTS_FOR") as ytdlp:
+            comments, summary = runtime_topic_filter.comments_for_with_client_fallback(
+                "https://www.youtube.com/watch?v=x", req, 1
+            )
+        self.assertEqual(len(comments), 1)
+        self.assertEqual(summary["stored"], 1)
+        ytdlp.assert_not_called()
 
     def test_comment_fallback_preserves_bounds_and_uses_anonymous_client(self):
         req = {
@@ -106,7 +181,8 @@ class TopicFilterTests(unittest.TestCase):
             "comment_count": 1,
             "comments": [{"id": "c1", "parent": "root", "text": "Useful SEO observation", "like_count": 2}],
         }
-        with patch.object(runtime_topic_filter, "_ORIGINAL_COMMENTS_FOR", side_effect=RuntimeError("bot")), \
+        with patch.object(runtime_topic_filter.innertube_runtime, "comments_payload", side_effect=RuntimeError("inner bot")), \
+             patch.object(runtime_topic_filter, "_ORIGINAL_COMMENTS_FOR", side_effect=RuntimeError("bot")), \
              patch.object(runtime_topic_filter.youtube_runtime, "load_json", return_value=payload) as load_json:
             comments, summary = runtime_topic_filter.comments_for_with_client_fallback(
                 "https://www.youtube.com/watch?v=x", req, 1

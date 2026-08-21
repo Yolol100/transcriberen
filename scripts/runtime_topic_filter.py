@@ -2,13 +2,14 @@
 """Runtime entrypoint that adds explainable metadata topic filtering.
 
 The canonical extraction policy remains scripts/runtime.py. This wrapper adds
-metadata topic filtering, bounded accountless YouTube client fallback and
+metadata topic filtering, bounded accountless InnerTube/yt-dlp fallback and
 production subtitle-normalization hardening before calling that runtime.
 """
 import json
 import re
 from pathlib import Path
 
+import innertube_runtime
 import youtube_runtime
 
 
@@ -16,6 +17,7 @@ _ORIGINAL_COLLECT = youtube_runtime.collect
 _ORIGINAL_YEAR_MATCHES = youtube_runtime.year_matches
 _ORIGINAL_DISCOVERY_PLAYLIST_END = youtube_runtime._discovery_playlist_end
 _ORIGINAL_METADATA_FOR = youtube_runtime.metadata_for
+_ORIGINAL_DOWNLOAD_CAPTION = youtube_runtime.download_caption
 _ORIGINAL_COMMENTS_FOR = youtube_runtime.comments_for
 _TIMING_RE = re.compile(
     r"(?:\d{1,2}:)?\d{2}:\d{2}[,.]\d{3}\s+-->\s+"
@@ -63,8 +65,6 @@ def _filtered_year_matches(meta, yt):
 def _topic_aware_playlist_end(req):
     yt = req.get("youtube", {})
     if yt.get("include_keywords"):
-        # Topic filtering needs the configured scan window, not merely max_items;
-        # otherwise an early non-topic prefix could hide later matching videos.
         scan_limit = int(yt.get("scan_limit", 500))
         return scan_limit or None
     return _ORIGINAL_DISCOVERY_PLAYLIST_END(req)
@@ -74,17 +74,78 @@ def _anonymous_clients():
     return (None, *youtube_runtime.SUBTITLE_CLIENT_FALLBACKS)
 
 
-def metadata_for_with_client_fallback(url, player_client=None):
-    """Try the default client, then the same bounded accountless clients as captions."""
+def _needs_engagement_metadata(yt):
+    yt = yt or {}
+    return bool(
+        yt.get("min_likes") is not None
+        or yt.get("min_comments") is not None
+        or yt.get("sort_by") in {"likes", "comments"}
+    )
+
+
+def _innertube_metadata_complete_for_request(meta, yt):
+    yt = yt or {}
+    required = []
+    if yt.get("year_from") is not None or yt.get("year_to") is not None or yt.get("sort_by") == "newest":
+        required.append("upload_date")
+    if yt.get("min_views") is not None or yt.get("sort_by") == "views":
+        required.append("view_count")
+    if yt.get("min_likes") is not None or yt.get("sort_by") == "likes":
+        required.append("like_count")
+    if yt.get("min_comments") is not None or yt.get("sort_by") == "comments":
+        required.append("comment_count")
+    return all(meta.get(field) is not None for field in required)
+
+
+def metadata_for_with_client_fallback(url, player_client=None, youtube_options=None):
+    """Prefer direct public InnerTube, then preserve bounded anonymous yt-dlp fallbacks."""
     if player_client is not None:
         return _ORIGINAL_METADATA_FOR(url, player_client=player_client)
+
     last_error = None
+    try:
+        meta = innertube_runtime.metadata_for(
+            url,
+            include_engagement=_needs_engagement_metadata(youtube_options),
+        )
+        if not _innertube_metadata_complete_for_request(meta, youtube_options):
+            raise innertube_runtime.InnerTubeUnsupported(
+                "InnerTube metadata lacks fields required by the active filter/ranking"
+            )
+        return meta
+    except Exception as exc:
+        last_error = exc
+
     for client in _anonymous_clients():
         try:
             return _ORIGINAL_METADATA_FOR(url, player_client=client)
         except Exception as exc:
             last_error = exc
-    raise RuntimeError(str(last_error or "anonymous metadata client fallback exhausted"))
+    raise RuntimeError(str(last_error or "public metadata provider fallback exhausted"))
+
+
+def download_caption_with_provider_fallback(url, meta, preferred_language="auto"):
+    """Prefer signed InnerTube captions, then preserve the reviewed yt-dlp cascade."""
+    last_error = None
+    inner_meta = meta if meta.get("_innertube_player_client") else None
+    if inner_meta is None:
+        try:
+            inner_meta = innertube_runtime.metadata_for(url)
+        except Exception as exc:
+            last_error = exc
+    if inner_meta is not None:
+        try:
+            track = youtube_runtime.choose_caption_track(inner_meta, preferred_language)
+            if track:
+                text, info = innertube_runtime.download_caption(inner_meta, track)
+                if text:
+                    return text, info
+        except Exception as exc:
+            last_error = exc
+    try:
+        return _ORIGINAL_DOWNLOAD_CAPTION(url, meta, preferred_language)
+    except Exception as exc:
+        raise RuntimeError(str(exc or last_error or "public caption provider fallback exhausted")) from exc
 
 
 def _comments_from_data(data, max_comments, include_replies, source_comment_count):
@@ -111,7 +172,7 @@ def _comments_from_data(data, max_comments, include_replies, source_comment_coun
 
 
 def comments_for_with_client_fallback(url, req, source_comment_count=None):
-    """Preserve comment limits while retrying only bounded anonymous player clients."""
+    """Prefer bounded public InnerTube top comments, then anonymous yt-dlp clients."""
     yt = req.get("youtube", {})
     max_comments = yt.get("max_comments", "200")
     include_replies = bool(yt.get("include_replies", False))
@@ -119,6 +180,17 @@ def comments_for_with_client_fallback(url, req, source_comment_count=None):
         return _ORIGINAL_COMMENTS_FOR(url, req, source_comment_count)
 
     last_error = None
+    try:
+        data = innertube_runtime.comments_payload(
+            url,
+            max_comments=max_comments,
+            comment_sort=yt.get("comment_sort", "top"),
+            include_replies=include_replies,
+        )
+        return _comments_from_data(data, max_comments, include_replies, source_comment_count)
+    except Exception as exc:
+        last_error = exc
+
     for client in _anonymous_clients():
         try:
             if client is None:
@@ -134,7 +206,7 @@ def comments_for_with_client_fallback(url, req, source_comment_count=None):
             return _comments_from_data(data, max_comments, include_replies, source_comment_count)
         except Exception as exc:
             last_error = exc
-    raise RuntimeError(str(last_error or "anonymous comment client fallback exhausted"))
+    raise RuntimeError(str(last_error or "public comment provider fallback exhausted"))
 
 
 def _next_nonempty_is_timing(lines, index):
@@ -170,7 +242,6 @@ def normalize_subtitles_hardened(path):
         if _TIMING_RE.search(line) or line.isdigit():
             continue
         if _next_nonempty_is_timing(lines, index):
-            # WebVTT cue identifiers are arbitrary strings, not only numbers.
             continue
 
         line = re.sub(r"<[^>]+>", "", line)
@@ -183,9 +254,20 @@ def normalize_subtitles_hardened(path):
 
 
 def collect_with_topic_filter(req, results_dir):
+    innertube_runtime.reset_diagnostics()
+    youtube_options = req.get("youtube", {})
+
+    def request_metadata(url, player_client=None):
+        return metadata_for_with_client_fallback(
+            url,
+            player_client=player_client,
+            youtube_options=youtube_options,
+        )
+
     youtube_runtime.year_matches = _filtered_year_matches
     youtube_runtime._discovery_playlist_end = _topic_aware_playlist_end
-    youtube_runtime.metadata_for = metadata_for_with_client_fallback
+    youtube_runtime.metadata_for = request_metadata
+    youtube_runtime.download_caption = download_caption_with_provider_fallback
     youtube_runtime.comments_for = comments_for_with_client_fallback
     try:
         content, index = _ORIGINAL_COLLECT(req, results_dir)
@@ -193,12 +275,21 @@ def collect_with_topic_filter(req, results_dir):
         youtube_runtime.year_matches = _ORIGINAL_YEAR_MATCHES
         youtube_runtime._discovery_playlist_end = _ORIGINAL_DISCOVERY_PLAYLIST_END
         youtube_runtime.metadata_for = _ORIGINAL_METADATA_FOR
+        youtube_runtime.download_caption = _ORIGINAL_DOWNLOAD_CAPTION
         youtube_runtime.comments_for = _ORIGINAL_COMMENTS_FOR
 
     keywords = list((req.get("youtube") or {}).get("include_keywords") or [])
     index["include_keywords"] = keywords
     index["topic_filter_basis"] = "metadata:title+description+tags+categories" if keywords else None
     index["topic_filter_normalization"] = "casefold+separator-to-space+token-match" if keywords else None
+    index["provider_strategy"] = [
+        "innertube-player:android",
+        "innertube-player:ios",
+        "innertube-comments:web-next",
+        "yt-dlp:default",
+        *[f"yt-dlp:{client}" for client in youtube_runtime.SUBTITLE_CLIENT_FALLBACKS],
+    ]
+    index["innertube_diagnostics"] = innertube_runtime.snapshot_diagnostics()
     Path(results_dir, "youtube-index.json").write_text(
         json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
@@ -206,9 +297,6 @@ def collect_with_topic_filter(req, results_dir):
 
 
 def main():
-    # Importing runtime patches youtube_runtime.run to the bounded subprocess
-    # adapter. Keep that side effect inside actual execution so unit-test import
-    # order cannot leak runtime state into unrelated tests.
     import runtime as base_runtime
 
     youtube_runtime.collect = collect_with_topic_filter
