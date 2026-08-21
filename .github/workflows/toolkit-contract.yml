@@ -119,6 +119,11 @@ jobs:
           ):
               assert needle in runtime
 
+          tool_bootstrap = pathlib.Path('scripts/install_tools.sh').read_text(encoding='utf-8')
+          assert 'yt-dlp/yt-dlp-nightly-builds/releases/latest' in tool_bootstrap
+          assert 'SHA2-256SUMS' in tool_bootstrap
+          assert 'YT_DLP_SHA256' in tool_bootstrap
+
           workflow = pathlib.Path('.github/workflows/transcribe.yml').read_text(encoding='utf-8')
           for needle in (
               'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
@@ -165,13 +170,23 @@ jobs:
         with:
           subject-path: ci-provenance.txt
 
-      - name: Verify pinned yt-dlp binary and Deno route
+      - name: Verify yt-dlp nightly binary and Deno route
         shell: bash
         run: |
           set -euo pipefail
           bash scripts/install_tools.sh false
-          test "$(tools/bin/yt-dlp --version)" = '2026.07.04'
+          YT_DLP_VERSION="$(tools/bin/yt-dlp --version)"
+          [[ "$YT_DLP_VERSION" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]{6}$ ]]
           tools/bin/deno --version | grep -F 'deno 2.9.5'
+          cat tools/yt-dlp-resolution.txt
+
+      - name: Upload resolved nightly evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: yt-dlp-nightly-resolution
+          path: tools/yt-dlp-resolution.txt
+          retention-days: 1
+          if-no-files-found: error
 
       - name: Verify Trafilatura runtime
         run: python -c "import trafilatura; assert trafilatura.__version__ == '2.1.0'; print(trafilatura.__version__)"
