@@ -36,7 +36,6 @@ def youtube_request(scope="video", url="https://www.youtube.com/watch?v=abcdefgh
     request.update({
         "mode": "youtube",
         "url": url,
-        "youtube_access_basis": "prior-written-permission",
         "youtube": {"scope": scope},
     })
     return request
@@ -90,6 +89,7 @@ class RequestContractTests(unittest.TestCase):
         validated = resolve_request.validate_request(request)
         self.assertIsNone(validated["url"])
         self.assertFalse(validated["analysis_content_allowed"])
+        self.assertEqual(validated["youtube_access_basis"], "public-anonymous")
 
     @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
     def test_youtube_disallows_audio_fallback(self, _dns):
@@ -99,11 +99,10 @@ class RequestContractTests(unittest.TestCase):
             resolve_request.validate_request(request)
 
     @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
-    def test_youtube_requires_reviewed_access_basis(self, _dns):
+    def test_youtube_accepts_public_anonymous_access_without_attestation(self, _dns):
         request = youtube_request()
-        request.pop("youtube_access_basis")
-        with self.assertRaisesRegex(ValueError, "automated access"):
-            resolve_request.validate_request(request)
+        validated = resolve_request.validate_request(request)
+        self.assertEqual(validated["youtube_access_basis"], "public-anonymous")
 
     @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
     def test_stale_concrete_source_set_is_rejected(self, _dns):
@@ -113,20 +112,20 @@ class RequestContractTests(unittest.TestCase):
             resolve_request.validate_request(request)
 
     @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
-    def test_public_repo_requires_explicit_request_acknowledgement(self, _dns):
+    def test_public_repo_does_not_require_request_acknowledgement(self, _dns):
         request = youtube_request()
         with patch.dict(resolve_request.os.environ, {"GITHUB_REPOSITORY_VISIBILITY": "public"}):
-            with self.assertRaisesRegex(ValueError, "public_request_acknowledged"):
-                resolve_request.validate_request(request)
+            validated = resolve_request.validate_request(request)
+        self.assertFalse(validated["public_request_acknowledged"])
 
     @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
-    def test_public_repo_forbids_raw_content_persistence(self, _dns):
+    def test_public_repo_allows_task_scoped_analysis_content(self, _dns):
         request = youtube_request()
-        request["public_request_acknowledged"] = True
         request["analysis_content_allowed"] = True
         with patch.dict(resolve_request.os.environ, {"GITHUB_REPOSITORY_VISIBILITY": "public"}):
-            with self.assertRaisesRegex(ValueError, "may not persist transcript/comment"):
-                resolve_request.validate_request(request)
+            validated = resolve_request.validate_request(request)
+        self.assertTrue(validated["analysis_content_allowed"])
+        self.assertFalse(validated["reuse_allowed"])
 
     @patch.object(resolve_request.socket, "getaddrinfo", return_value=PUBLIC_DNS)
     def test_bounded_comment_budget_is_enforced(self, _dns):
