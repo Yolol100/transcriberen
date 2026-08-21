@@ -223,6 +223,7 @@ def normalize_subtitles_hardened(path):
     out = []
     previous = None
     skip_block = False
+    in_cue = False
 
     for index, raw in enumerate(lines):
         line = raw.strip()
@@ -232,16 +233,19 @@ def normalize_subtitles_hardened(path):
                 skip_block = False
             continue
         if not line:
-            continue
-        if line == "WEBVTT" or line.startswith(_HEADER_METADATA_PREFIXES):
-            continue
-        if line in _BLOCK_HEADERS or line == "NOTE" or line.startswith(("NOTE ", "NOTE\t")):
-            skip_block = True
+            in_cue = False
             continue
         if _TIMING_RE.search(line):
+            in_cue = True
             continue
-        if _next_nonempty_is_timing(lines, index):
-            continue
+        if not in_cue:
+            if line == "WEBVTT" or line.startswith(_HEADER_METADATA_PREFIXES):
+                continue
+            if line in _BLOCK_HEADERS or line == "NOTE" or line.startswith(("NOTE ", "NOTE\t")):
+                skip_block = True
+                continue
+            if _next_nonempty_is_timing(lines, index):
+                continue
 
         line = re.sub(r"<[^>]+>", "", line)
         line = re.sub(r"\s+", " ", line).strip()
