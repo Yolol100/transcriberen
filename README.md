@@ -64,19 +64,25 @@ Voor `workflow_dispatch` is `youtube_include_keywords` een komma-gescheiden stri
 
 Bij `language=auto`: Engels -> Nederlands -> eerste andere echte track. Binnen dezelfde taal wint manual van automatic. Auto-vertalingen worden uitgesloten.
 
-De runtime gebruikt de expliciet gereviewde yt-dlp nightly `2026.08.20.234504` met SHA-256 `8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93` en Deno `2.9.5`. Nightly wordt gebruikt omdat YouTube-extractor- en player-clientcompatibiliteit snel verandert; de runtime auto-updatet niet tijdens een run. Captionextractie probeert eerst de normale anonieme yt-dlp-route. Als die route geen bruikbare caption levert, volgen begrensde accountloze client-fallbacks (`tv`, `mweb`, `web_safari`, `web_embedded`). Er worden geen cookies, accounts, proxies of handmatige PO-tokens toegevoegd. Een echte upstream access-/anti-botblokkade blijft `access_blocked`.
+Voor een losse publieke video probeert de runtime nu eerst een repo-native, dependency-vrije InnerTube-route: Android `/player`, daarna iOS `/player`. De gekozen signed captiontrack wordt alleen als `json3` of `srv1` tekst opgehaald. De adapter gebruikt geen cookies, login, proxy, browser/TLS-fingerprint-impersonatie, PO-token of media-endpoint; redirects mogen alleen naar YouTube/GoogleVideo. Als InnerTube geen bruikbare metadata/caption levert, blijft de bestaande yt-dlp-cascade beschikbaar.
+
+De yt-dlp-fallback gebruikt de expliciet gereviewde nightly `2026.08.20.234504` met SHA-256 `8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93` en Deno `2.9.5`. Captionextractie probeert daar eerst de normale anonieme route en daarna begrensde accountloze client-fallbacks (`tv`, `mweb`, `web_safari`, `web_embedded`). Er worden geen cookies, accounts, proxies of handmatige PO-tokens toegevoegd. Een echte upstream access-/anti-botblokkade blijft `access_blocked`.
 
 Met `analysis_content_allowed=true` worden geselecteerde captions geschreven naar `results/content.md` en per video naar `results/items/<id>/transcript.md`; cue-level provenance staat in `results/items/<id>/transcript-cues.json`.
 
 ## Comments
 
-`include_comments=true` haalt comments op met `comment_sort=top|new`. Standaard is `include_replies=false`: bounded commentwerk beperkt zowel totaal als parents en vraagt nul replies op. Replies vereisen expliciete opt-in.
+`include_comments=true` haalt comments op met `comment_sort=top|new`. Voor `comment_sort=top` en `include_replies=false` probeert de runtime eerst de publieke WEB InnerTube `/next`-route met de publieke WEB-clientconfig; daarvoor is geen door de gebruiker aangeleverde API-key of account nodig. De route is hard begrensd op maximaal 100 pagina's/1000 records en valt bij een niet-ondersteunde of mislukte respons terug op de bestaande anonieme yt-dlp-cascade. `comment_sort=new` en replies blijven op de bestaande yt-dlp-route zodat de runtime geen volledigheid claimt die de InnerTube-adapter niet kan bewijzen.
 
-`raise_incomplete_data=1` maakt een onvolledige YouTube-commentresponse een echte fout. Daardoor wordt gedeeltelijke commentextractie niet als succesvol afgerond opgeslagen. Tijdelijke netwerk-/5xx-fouten krijgen begrensde retries; 429/rate-limitfouten krijgen langere cooldowns. Tussen geselecteerde zware YouTube-items gebruikt de runtime 5-10 seconden jitter.
+Standaard is `include_replies=false`: bounded commentwerk beperkt zowel totaal als parents en vraagt nul replies op. Replies vereisen expliciete opt-in. `raise_incomplete_data=1` maakt een onvolledige yt-dlp-commentresponse een echte fout. Daardoor wordt gedeeltelijke commentextractie niet als succesvol afgerond opgeslagen. Tijdelijke netwerk-/5xx-fouten krijgen begrensde retries; 429/rate-limitfouten krijgen langere cooldowns. Tussen geselecteerde zware YouTube-items gebruikt de runtime 5-10 seconden jitter.
 
 Directe author-ID/naam/URL worden niet opgeslagen. Voor persistence worden duidelijke e-mailadressen, URLs, handles en telefoonnummers in tekst geredigeerd. Dit is dataminimalisatie, geen garantie op volledige anonimisering.
 
 Met `comment_selection=knowledge` maakt de runtime alleen **review-kandidaten**. Signalen zijn onder andere creator, pinned, creator-favorited, likes en overlap met `knowledge_context.goal/keywords`. `comment-review.json` markeert tekst expliciet als untrusted. `knowledge-handoff.json` geeft een generieke overdracht naar de gekozen `target_owner`. De inhoudelijke Skill/projecteigenaar moet semantic review, currentness, deduplicatie en conflictcheck uitvoeren vóór promotie.
+
+## Providerdiagnostiek
+
+`youtube-index.json` bevat naast de normale selectie/provenance een `provider_strategy` en begrensde `innertube_diagnostics`. Per poging wordt alleen operationele informatie vastgelegd (operatie, client, success/error en een begrensde foutdetailtekst). Daardoor is bij een smoke-test zichtbaar of Android-player, iOS-player, WEB-next of de latere yt-dlp-cascade de beperkende route was, zonder cookies, tokens of gebruikersidentiteit te loggen.
 
 ## Recovery en checkpoints
 
@@ -110,6 +116,7 @@ De runtime levert `results/result.json` en, voor YouTube, `youtube-index.json` p
 ## Security/CI
 
 - GitHub Actions zijn op immutable commit-SHA's gepind.
+- De repo-native InnerTube-adapter gebruikt alleen Python-stdlib, directe HTTPS, een publiek YouTube-clientprofiel en begrensde responses; omgeving-proxies en externe redirects worden expliciet geweigerd.
 - yt-dlp gebruikt een expliciet gereviewde nightly-tag met een in de repository vastgelegde SHA-256; er is geen onbegrensde runtime-auto-update.
 - Deno, Whisper en het Whisper-model zijn eveneens versie-/digestgebonden; Python productie-installatie gebruikt een volledig gehashte wheel-lock.
 - PR's krijgen GitHub Dependency Review; de lock krijgt daarnaast pip-audit.
