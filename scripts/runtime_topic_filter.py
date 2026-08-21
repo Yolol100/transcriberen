@@ -213,12 +213,11 @@ def comments_for_with_client_fallback(url, req, source_comment_count=None):
 
 
 def _next_nonempty_is_timing(lines, index):
-    for following in lines[index + 1:]:
-        candidate = following.strip()
-        if not candidate:
-            continue
-        return bool(_TIMING_RE.search(candidate))
-    return False
+    next_index = index + 1
+    if next_index >= len(lines):
+        return False
+    candidate = lines[next_index].strip()
+    return bool(candidate and _TIMING_RE.search(candidate))
 
 
 def normalize_subtitles_hardened(path):
@@ -227,6 +226,7 @@ def normalize_subtitles_hardened(path):
     out = []
     previous = None
     skip_block = False
+    in_cue = False
 
     for index, raw in enumerate(lines):
         line = raw.strip()
@@ -236,16 +236,19 @@ def normalize_subtitles_hardened(path):
                 skip_block = False
             continue
         if not line:
+            in_cue = False
             continue
-        if line == "WEBVTT" or line.startswith(_HEADER_METADATA_PREFIXES):
+        if _TIMING_RE.search(line):
+            in_cue = True
             continue
-        if line in _BLOCK_HEADERS or line == "NOTE" or line.startswith(("NOTE ", "NOTE\t")):
-            skip_block = True
-            continue
-        if _TIMING_RE.search(line) or line.isdigit():
-            continue
-        if _next_nonempty_is_timing(lines, index):
-            continue
+        if not in_cue:
+            if line == "WEBVTT" or line.startswith(_HEADER_METADATA_PREFIXES):
+                continue
+            if line in _BLOCK_HEADERS or line == "NOTE" or line.startswith(("NOTE ", "NOTE\t")):
+                skip_block = True
+                continue
+            if _next_nonempty_is_timing(lines, index):
+                continue
 
         line = re.sub(r"<[^>]+>", "", line)
         line = re.sub(r"\s+", " ", line).strip()
