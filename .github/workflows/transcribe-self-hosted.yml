@@ -1,0 +1,233 @@
+name: Transcribe Public Source Self-Hosted
+
+on:
+  push:
+    branches: [runtime-requests-selfhosted]
+    paths:
+      - 'requests/queue/*.json'
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.resolve.outputs.run }}
+      request_id: ${{ steps.resolve.outputs.request_id }}
+      install_whisper: ${{ steps.resolve.outputs.install_whisper }}
+      persist_content: ${{ steps.resolve.outputs.persist_content }}
+    steps:
+      - name: Read immutable self-hosted queue request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+          path: transport
+
+      - name: Validate self-hosted queue transport
+        id: queue
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          RUNNER_TEMP_DIR: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, re, subprocess
+          root = pathlib.Path('transport')
+          before, after = os.environ['BEFORE'], os.environ['AFTER']
+          changed = subprocess.check_output(
+              ['git', '-C', str(root), 'diff', '--name-status', before, after], text=True
+          ).splitlines()
+          accepted = []
+          for line in changed:
+              parts = line.split('\t')
+              if len(parts) == 2 and parts[0] == 'A' and re.fullmatch(
+                  r'requests/queue/[A-Za-z0-9][A-Za-z0-9._-]{2,79}\.json', parts[1]
+              ):
+                  accepted.append(parts[1])
+              elif line.strip():
+                  raise SystemExit(f'self-hosted queue may add exactly one request JSON and nothing else: {line}')
+          if len(accepted) != 1:
+              raise SystemExit(f'expected exactly one new queue request, got {len(accepted)}')
+          source = root / accepted[0]
+          request = json.loads(source.read_text(encoding='utf-8'))
+          request_id = str(request.get('request_id') or '')
+          if source.stem != request_id:
+              raise SystemExit('queue filename must equal request_id')
+          if request.get('enabled') is not True:
+              raise SystemExit('queue request must set enabled=true')
+          target = pathlib.Path(os.environ['RUNNER_TEMP_DIR']) / 'incoming-request.json'
+          target.write_text(
+              json.dumps(request, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
+          )
+          print(f'self-hosted queue request: {request_id}')
+          PY
+
+      - name: Checkout trusted runtime
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Yolol100/transcriberen
+          ref: main
+          persist-credentials: false
+          path: runtime
+
+      - name: Resolve and validate request
+        id: resolve
+        working-directory: runtime
+        env:
+          REQUEST_FILE: ${{ runner.temp }}/incoming-request.json
+          GITHUB_REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
+        run: python3 scripts/resolve_request_hardened.py
+
+      - name: Upload resolved request for self-hosted runtime job
+        if: steps.resolve.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: resolved-transcription-request-self-hosted
+          path: runtime/resolved-request.json
+          retention-days: 1
+          if-no-files-found: error
+
+  runtime:
+    needs: resolve
+    if: needs.resolve.outputs.run == 'true' && github.repository == 'Yolol100/transcriberen'
+    runs-on: [self-hosted, linux, x64, webactueel-transcribe]
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+      statuses: write
+    timeout-minutes: 330
+    concurrency:
+      group: transcribe-self-hosted-${{ needs.resolve.outputs.request_id }}
+      cancel-in-progress: false
+    steps:
+      - name: Verify dedicated runner boundary
+        shell: bash
+        env:
+          EXPECTED_ENVIRONMENT: self-hosted
+          ACTUAL_ENVIRONMENT: ${{ runner.environment }}
+          ACTUAL_OS: ${{ runner.os }}
+          ACTUAL_ARCH: ${{ runner.arch }}
+        run: |
+          set -euo pipefail
+          test "$ACTUAL_ENVIRONMENT" = "$EXPECTED_ENVIRONMENT"
+          test "$ACTUAL_OS" = 'Linux'
+          test "$ACTUAL_ARCH" = 'X64'
+
+      - name: Checkout trusted runtime only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Yolol100/transcriberen
+          ref: main
+          persist-credentials: false
+          clean: true
+
+      - name: Record runtime SHA
+        id: runtime_sha
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Download resolved request
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: resolved-transcription-request-self-hosted
+
+      - name: Install verified Python extraction dependencies
+        run: bash scripts/install_python_deps.sh
+
+      - name: Install FFmpeg only for authorized Whisper fallback
+        if: needs.resolve.outputs.install_whisper == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          timeout 300s sudo apt-get "${APT_OPTS[@]}" update
+          timeout 300s sudo apt-get "${APT_OPTS[@]}" install -y --no-install-recommends ffmpeg
+          command -v ffmpeg
+          command -v ffprobe
+
+      - name: Install pinned local tools
+        run: bash scripts/install_tools.sh '${{ needs.resolve.outputs.install_whisper }}'
+
+      - name: Execute public-source runtime on direct host network
+        env:
+          REQUEST_FILE: resolved-request.json
+          GITHUB_REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
+          GITHUB_SHA: ${{ steps.runtime_sha.outputs.sha }}
+          TRANSCRIBE_EXECUTION_TARGET: self-hosted
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy || true
+          python scripts/runtime_topic_filter.py
+
+      - name: Normalize extended YouTube result for current validator
+        if: always()
+        run: |
+          if [ -f results/youtube-index.json ]; then
+            python scripts/normalize_youtube_result_v2.py results/youtube-index.json
+          fi
+
+      - name: Validate result contract, privacy and provenance
+        id: result_validation
+        run: python scripts/validate_result.py results/result.json
+
+      - name: Build deterministic result checksum receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd results
+            find . -type f ! -name SHA256SUMS.txt -print0 \
+              | sort -z \
+              | xargs -0 sha256sum \
+              | sed 's#  \./#  #' \
+              > SHA256SUMS.txt
+            test -s SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+          )
+
+      - name: Attest result checksum receipt
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: results/SHA256SUMS.txt
+
+      - name: Publish provenance summary
+        if: always()
+        shell: bash
+        run: |
+          echo '## Transcriberen controlled-runtime (self-hosted)' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo "Request: ${{ needs.resolve.outputs.request_id }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Runner environment: ${{ runner.environment }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Content persistence: ${{ needs.resolve.outputs.persist_content }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Runtime SHA: ${{ steps.runtime_sha.outputs.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f results/result.json ]; then
+            python -c 'import json; r=json.load(open("results/result.json", encoding="utf-8")); p=r.get("runtime_provenance") or {}; print("Mode: {}\nEvidence: {}\nUsage: {}\nSource set: {}\nHead SHA: {}\nRun ID: {}\nContent persisted: {}".format(r.get("detected_mode"), r.get("evidence_level"), r.get("usage_mode"), (r.get("source_context") or {}).get("source_set_version"), p.get("head_sha"), p.get("run_id"), r.get("content_persisted")))' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload validated result
+        if: steps.result_validation.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: transcription-result-${{ needs.resolve.outputs.request_id }}-self-hosted
+          path: results/
+          retention-days: 3
+          if-no-files-found: warn
+
+      - name: Publish self-hosted queue-run status and run URL
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/publish_ci_status.py --context 'runtime/Transcribe Public Source Self-Hosted' --result '${{ job.status }}'
