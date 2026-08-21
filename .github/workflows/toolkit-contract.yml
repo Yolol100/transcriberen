@@ -71,7 +71,9 @@ jobs:
           tools = {tool['id']: tool for tool in contract['tools']}
           assert set(tools) == {'yt-dlp', 'deno-ejs-runtime'}
           assert tools['yt-dlp']['version'] == '2026.08.20.234504'
+          assert tools['yt-dlp']['sha256'] == '8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93'
           assert tools['deno-ejs-runtime']['version'] == '2.9.5'
+          assert tools['deno-ejs-runtime']['sha256'] == '8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530'
 
           forbidden = {
               'requirements.in', 'requirements.txt', 'requirements.lock',
@@ -100,16 +102,27 @@ jobs:
           assert 'source_type = "short"' in resolver
 
           runtime = pathlib.Path('scripts/captions_runtime.py').read_text(encoding='utf-8')
-          for needle in ('"--skip-download"', '"--no-cookies"', 'skipped_no_captions', 'transcript.txt'):
+          for needle in ('"--skip-download"', '"--no-cookies"', 'skipped_no_captions', 'transcript.txt', 'deno_version'):
               assert needle in runtime
+          assert '"--no-warnings"' not in runtime
           for forbidden_term in ('include_comments', 'knowledge_context', 'whisper', 'ffmpeg', 'trafilatura'):
               assert forbidden_term not in runtime.casefold()
+
+          installer = pathlib.Path('scripts/install_tools.sh').read_text(encoding='utf-8')
+          for needle in (
+              'YT_DLP_SHA256="8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93"',
+              'DENO_SHA256="8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530"',
+              '--js-runtimes "deno:$HERE/deno"',
+              'sha256sum -c -',
+          ):
+              assert needle in installer
 
           workflow = pathlib.Path('.github/workflows/transcribe.yml').read_text(encoding='utf-8')
           assert 'branches: [runtime-requests]' in workflow
           assert 'runs-on: [self-hosted, linux, x64, webactueel-transcribe]' in workflow
           assert 'python3 scripts/captions_runtime.py' in workflow
           assert 'ref: main' in workflow
+          assert "--result pending" in workflow
           assert 'workflow_dispatch:' not in workflow
           assert 'workflow_call:' not in workflow
           for forbidden_term in ('runtime_topic_filter.py', 'normalize_youtube_result', 'ffmpeg', 'whisper'):
@@ -117,6 +130,14 @@ jobs:
 
           print('toolkit-contract: OK')
           PY
+
+      - name: Verify pinned tool bootstrap and Deno wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/install_tools.sh
+          test "$(tools/bin/yt-dlp --version)" = '2026.08.20.234504'
+          tools/bin/deno --version | head -n 1 | grep -Fx 'deno 2.9.5'
 
       - name: Create deterministic CI provenance receipt
         shell: bash
