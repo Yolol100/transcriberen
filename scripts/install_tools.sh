@@ -43,10 +43,13 @@ PY
 install -m 0755 "$TMP_ROOT/deno" "$BIN_DIR/deno"
 "$BIN_DIR/deno" --version
 
-YT_DLP_VERSION="2026.07.04"
-YT_DLP_SHA256="495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd"
+# yt-dlp's nightly channel is the upstream-recommended regular-user channel and
+# carries fast-moving YouTube extractor/player-client fixes. Keep the exact
+# nightly tag and digest reviewed/pinned here; do not auto-update during a run.
+YT_DLP_VERSION="2026.08.20.234504"
+YT_DLP_SHA256="8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93"
 YT_DLP_DOWNLOAD="$TMP_ROOT/yt-dlp.bin"
-curl_https "https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/yt-dlp" -o "$YT_DLP_DOWNLOAD"
+curl_https "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/${YT_DLP_VERSION}/yt-dlp" -o "$YT_DLP_DOWNLOAD"
 verify_sha256 "$YT_DLP_SHA256" "$YT_DLP_DOWNLOAD"
 install -m 0755 "$YT_DLP_DOWNLOAD" "$BIN_DIR/yt-dlp.bin"
 cat > "$BIN_DIR/yt-dlp" <<'WRAPPER'

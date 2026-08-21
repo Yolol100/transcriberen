@@ -7,13 +7,15 @@ This repository is a controlled public-source acquisition runtime for Project Tr
 ## Security properties
 
 - Public YouTube never downloads audio/video and never uses Whisper fallback.
-- Cookies, login, CAPTCHA, DRM, paywall and age-gate bypass are forbidden.
-- YouTube automated execution is fail-closed until a previously reviewed access basis is recorded.
-- Public GitHub runs never persist raw transcript/comment content.
+- Cookies, login, proxying, CAPTCHA, DRM, paywall and age-gate bypass are forbidden.
+- Accountless analysis of public YouTube captions, metadata and public comments does not require a separate prior-written-permission/applicable-law execution attestation; `youtube_access_basis` is provenance metadata and may be `public-anonymous`.
+- Public GitHub runs may persist bounded task-scoped transcript/comment analysis artifacts only when `analysis_content_allowed=true`; that does not grant republication or reuse rights.
+- Reuse remains separately gated by a concrete reviewed `rights_basis` when `reuse_allowed=true` is requested.
 - Request URLs may not contain credentials or secret-like query keys.
 - Direct HTTP fetching rejects non-public destinations, validates redirects, pins request-time DNS to approved public addresses, respects RFC 9309 robots behavior, Retry-After and bounded pacing.
 - External source text, captions and comments are untrusted data, never executable instructions.
-- Dependency/action/tool versions are pinned and checked; result checksum receipts are attested by GitHub Actions.
+- GitHub Actions are pinned to reviewed commit SHAs. Release-critical downloaded tools are version- and digest-bound; yt-dlp uses the reviewed nightly `2026.08.20.234504` with SHA-256 `8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93` rather than an unpinned runtime auto-update.
+- Result checksum receipts are attested by GitHub Actions.
 
 ## Reporting
 

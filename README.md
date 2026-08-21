@@ -50,7 +50,7 @@ Voor `workflow_dispatch` is `youtube_include_keywords` een komma-gescheiden stri
 
 Bij `language=auto`: Engels -> Nederlands -> eerste andere echte track. Binnen dezelfde taal wint manual van automatic. Auto-vertalingen worden uitgesloten.
 
-Captionextractie probeert eerst de normale anonieme yt-dlp-route. Als die route geen bruikbare caption levert, volgen begrensde accountloze client-fallbacks (`tv`, `mweb`, `web_safari`, `web_embedded`). Er worden geen cookies, accounts, proxies of handmatige PO-tokens toegevoegd. Een echte upstream access-/anti-botblokkade blijft `access_blocked`.
+De runtime gebruikt de expliciet gereviewde yt-dlp nightly `2026.08.20.234504` met SHA-256 `8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93` en Deno `2.9.5`. Nightly wordt gebruikt omdat YouTube-extractor- en player-clientcompatibiliteit snel verandert; de runtime auto-updatet niet tijdens een run. Captionextractie probeert eerst de normale anonieme yt-dlp-route. Als die route geen bruikbare caption levert, volgen begrensde accountloze client-fallbacks (`tv`, `mweb`, `web_safari`, `web_embedded`). Er worden geen cookies, accounts, proxies of handmatige PO-tokens toegevoegd. Een echte upstream access-/anti-botblokkade blijft `access_blocked`.
 
 Met `analysis_content_allowed=true` worden geselecteerde captions geschreven naar `results/content.md` en per video naar `results/items/<id>/transcript.md`; cue-level provenance staat in `results/items/<id>/transcript-cues.json`.
 
@@ -95,8 +95,9 @@ De runtime levert `results/result.json` en, voor YouTube, `youtube-index.json` p
 
 ## Security/CI
 
-- Actions en tooldownloads zijn op immutable SHA's gepind.
-- Python productie-installatie gebruikt een volledig gehashte wheel-lock.
+- GitHub Actions zijn op immutable commit-SHA's gepind.
+- yt-dlp gebruikt een expliciet gereviewde nightly-tag met een in de repository vastgelegde SHA-256; er is geen onbegrensde runtime-auto-update.
+- Deno, Whisper en het Whisper-model zijn eveneens versie-/digestgebonden; Python productie-installatie gebruikt een volledig gehashte wheel-lock.
 - PR's krijgen GitHub Dependency Review; de lock krijgt daarnaast pip-audit.
 - CodeQL scant Python en Actions.
 - `SECURITY.md` en `THREAT-MODEL.md` beschrijven de trust boundaries.
