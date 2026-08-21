@@ -75,6 +75,14 @@ exec "$HERE/yt-dlp.bin" --js-runtimes "deno:$HERE/deno" "$@"
 WRAPPER
 chmod 0755 "$BIN_DIR/yt-dlp"
 
+printf 'yt-dlp binary version: '
+"$BIN_DIR/yt-dlp.bin" --version
+printf 'Deno binary version: '
+"$BIN_DIR/deno" --version | head -n 1
+printf 'yt-dlp wrapper version: '
+"$BIN_DIR/yt-dlp" --version
+
+test "$("$BIN_DIR/yt-dlp.bin" --version)" = "$YT_DLP_VERSION"
 test "$("$BIN_DIR/yt-dlp" --version)" = "$YT_DLP_VERSION"
 "$BIN_DIR/deno" --version | head -n 1 | grep -Fx "deno $DENO_VERSION" >/dev/null
 
