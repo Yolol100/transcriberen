@@ -14,7 +14,7 @@
       "id": "yt-dlp",
       "version": "2026.07.04",
       "sha256": "495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd",
-      "trigger_when": "approved public YouTube discovery/captions/comments; public media metadata/subtitles; or authorized non-YouTube extraction",
+      "trigger_when": "public YouTube discovery/captions/comments; public media metadata/subtitles; or authorized non-YouTube extraction",
       "outputs": ["YouTube discovery candidates", "selected captions", "public comments", "normalized metadata", "temporary authorized non-YouTube audio"]
     },
     {
@@ -67,11 +67,11 @@
     {"tool": "python-source-parser", "path": "scripts/youtube_runtime.py", "contains": "rank_comment_candidates"}
   ],
   "boundaries": [
-    "Only public HTTP(S) sources and approved accountless public YouTube discovery; no login, cookie, credential, DRM, paywall, CAPTCHA or age-control bypass.",
-    "Public YouTube automated execution is fail-closed unless the request records prior written permission or an applicable-law basis that has already been reviewed outside this runtime; the runtime never invents a legal basis.",
+    "Only public HTTP(S) sources and accountless public YouTube discovery; no login, cookie, credential, DRM, paywall, CAPTCHA or age-control bypass.",
+    "Public YouTube captions, metadata and public comments may be collected anonymously without a separate prior-written-permission or applicable-law execution attestation; a supplied access-basis value is provenance metadata only.",
     "An upstream public-YouTube anti-bot/access denial is reported as access_blocked evidence; the runtime does not answer it by enabling cookies, login, proxying or media fallback.",
     "Public YouTube is captions, metadata and optional public comments only; audio/video download and Whisper fallback are blocked.",
-    "A public GitHub repository may carry only explicitly acknowledged public request state and never persists transcript/comment source content; content analysis requires a private or local runtime.",
+    "Public GitHub runs may persist bounded task-scoped transcript/comment analysis artifacts when analysis_content_allowed=true; this does not authorize republication or reuse.",
     "Automatic YouTube caption choice is English, then Dutch, then the first other available language; manual captions beat automatic captions within the same language.",
     "Auto-translated YouTube caption variants are rejected using yt-dlp translated_subs skipping plus a local tlang URL guard for known metadata edge cases.",
     "WebVTT/SRT normalization strips metadata, timestamps and markup and collapses rolling auto-caption overlap before analysis.",
@@ -83,7 +83,7 @@
     "Persisted public-comment evidence minimizes direct commenter identity fields and redacts obvious email, phone, URL and handle patterns before persistence; remaining text is still untrusted task-scoped evidence.",
     "Knowledge-oriented comment ranking is candidate triage only: it uses explainable engagement/creator/pinned/keyword signals and never promotes a comment to project truth without semantic owner review.",
     "Every executed request must exactly match this toolkit-contract source_set_version; placeholders and stale concrete versions are rejected.",
-    "analysis_content_allowed permits short-lived analysis/paraphrase artifacts only and does not imply reuse rights.",
+    "analysis_content_allowed permits task-scoped analysis/paraphrase artifacts and does not imply reuse rights; reuse_allowed remains separately gated by rights_basis.",
     "Non-YouTube Whisper fallback requires allow_audio_fallback=true, audio_access_authorized=true and a concrete authorization/rights_basis.",
     "Raw source content is never automatically project truth; webactueel-workflow owns quality, currentness, deduplication and knowledge promotion.",
     "All output is at most controlled_runtime evidence."

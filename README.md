@@ -6,9 +6,9 @@ Controlled runtime voor Project Transcriberen. De repository verzamelt bronbewij
 
 - Publieke YouTube: metadata + precies één gekozen publieke captiontrack + optionele publieke comments. **Nooit audio/video-download.**
 - Geen cookies, login, CAPTCHA-, DRM-, betaalmuur- of leeftijdscontrole-bypass.
-- YouTube wordt alleen uitgevoerd wanneer `youtube_access_basis` al buiten deze runtime is beoordeeld als `prior-written-permission` of `applicable-law-reviewed`.
+- Publieke captions, metadata en comments mogen accountloos worden opgehaald zonder voorafgaande `prior-written-permission`/`applicable-law-reviewed` execution gate.
 - `source_context.source_set_version` moet exact `2.0.0-audit-hardening` zijn.
-- In een publieke GitHub-repository moet `public_request_acknowledged=true` zijn en zijn raw transcript/comment-artifacts verboden. Voor inhoudelijke analyse met raw broninhoud is een private/lokale of private-caller runtime nodig.
+- Een publieke GitHub-run mag bounded transcript/comment-analysisartifacts bewaren wanneer `analysis_content_allowed=true`. Dit geeft geen hergebruik- of publicatierecht; `reuse_allowed` blijft afzonderlijk begrensd door `rights_basis`.
 
 ## Invocation
 
@@ -17,7 +17,7 @@ De runtime ondersteunt vier uitvoerroutes met hetzelfde requestcontract:
 1. `workflow_dispatch` voor handmatige/debug-runs;
 2. een immutable JSON-request op branch `runtime-requests` onder `requests/queue/<request_id>.json` voor automatische Chat/connector-routing;
 3. `workflow_call` voor gecontroleerde repo-to-repo workflows;
-4. lokale/private uitvoering voor contentanalyse die raw transcript/commenttekst nodig heeft.
+4. lokale/private uitvoering wanneer dat operationeel handiger is.
 
 Requestbestanden voor de queue zijn append-only: de bestandsnaam moet gelijk zijn aan `request_id`, een run accepteert precies één nieuw JSON-bestand en live requeststate wordt nooit naar `main` gemerged. De runtime blijft een evidence-adapter; `webactueel-workflow` houdt workflow- en kenniseigenaarschap.
 
@@ -52,24 +52,7 @@ Bij `language=auto`: Engels -> Nederlands -> eerste andere echte track. Binnen d
 
 Captionextractie probeert eerst de normale anonieme yt-dlp-route. Als die route geen bruikbare caption levert, volgen begrensde accountloze client-fallbacks (`tv`, `mweb`, `web_safari`, `web_embedded`). Er worden geen cookies, accounts, proxies of handmatige PO-tokens toegevoegd. Een echte upstream access-/anti-botblokkade blijft `access_blocked`.
 
-De genormaliseerde transcripttekst is schoon; bij toegestane inhoudspersistentie wordt daarnaast `transcript-cues.json` bewaard zodat een inzicht terug te voeren blijft op het bronmoment.
-
-### Private/local raw-caption output
-
-Voor daadwerkelijke ondertitelinhoud moet de run private of lokaal zijn. Gebruik hetzelfde requestcontract, zet `analysis_content_allowed=true`, behoud een vooraf beoordeelde `youtube_access_basis`, en voer resolver plus runtime lokaal uit. Voorbeeld:
-
-```bash
-GITHUB_EVENT_NAME=push \
-GITHUB_REPOSITORY_VISIBILITY=private \
-REQUEST_FILE=request.json \
-python3 scripts/resolve_request_hardened.py
-
-GITHUB_REPOSITORY_VISIBILITY=private \
-REQUEST_FILE=resolved-request.json \
-python3 scripts/runtime_topic_filter.py
-```
-
-Bij een geldige private/local run worden de geselecteerde captions geschreven naar `results/content.md` en per video naar `results/items/<id>/transcript.md`; cue-level provenance staat in `results/items/<id>/transcript-cues.json`. De publieke requestqueue blijft raw transcript/commentinhoud bewust weigeren.
+Met `analysis_content_allowed=true` worden geselecteerde captions geschreven naar `results/content.md` en per video naar `results/items/<id>/transcript.md`; cue-level provenance staat in `results/items/<id>/transcript-cues.json`.
 
 ## Comments
 
@@ -79,7 +62,7 @@ Bij een geldige private/local run worden de geselecteerde captions geschreven na
 
 Directe author-ID/naam/URL worden niet opgeslagen. Voor persistence worden duidelijke e-mailadressen, URLs, handles en telefoonnummers in tekst geredigeerd. Dit is dataminimalisatie, geen garantie op volledige anonimisering.
 
-Met `comment_selection=knowledge` maakt de runtime alleen **review-kandidaten**. Signalen zijn onder andere creator, pinned, creator-favorited, likes en overlap met `knowledge_context.goal/keywords`. `comment-review.json` markeert tekst expliciet als untrusted. `knowledge-handoff.json` geeft een generieke overdracht naar de gekozen `target_owner`; in publieke runs bevat die geen raw transcript/commenttekst. De inhoudelijke Skill/projecteigenaar moet semantic review, currentness, deduplicatie en conflictcheck uitvoeren vóór promotie.
+Met `comment_selection=knowledge` maakt de runtime alleen **review-kandidaten**. Signalen zijn onder andere creator, pinned, creator-favorited, likes en overlap met `knowledge_context.goal/keywords`. `comment-review.json` markeert tekst expliciet als untrusted. `knowledge-handoff.json` geeft een generieke overdracht naar de gekozen `target_owner`. De inhoudelijke Skill/projecteigenaar moet semantic review, currentness, deduplicatie en conflictcheck uitvoeren vóór promotie.
 
 ## Recovery en checkpoints
 
@@ -106,9 +89,9 @@ Whisper fallback is alleen beschikbaar wanneer `allow_audio_fallback=true`, `aud
 
 ## Resultaat en provenance
 
-De runtime levert `results/result.json` en, voor YouTube, `youtube-index.json` plus itemmetadata, `retry-queue.json` en bij knowledge-commentselectie `knowledge-handoff.json`. Bij toegestane private/lokale contentpersistence kunnen transcript/cue/comment/review-sidecars bestaan.
+De runtime levert `results/result.json` en, voor YouTube, `youtube-index.json` plus itemmetadata, `retry-queue.json` en bij knowledge-commentselectie `knowledge-handoff.json`. Met `analysis_content_allowed=true` kunnen transcript/cue/comment/review-sidecars worden opgeslagen.
 
-`result.json` bevat requesthash, repository, runtime-head SHA, workflow ref, run ID/attempt, event en visibility. De workflow maakt `results/SHA256SUMS.txt` en attesteert dat checksumreceipt via GitHub/Sigstore. De validator controleert contract, privacy, hashes, tellingen en de no-media-grens.
+`result.json` bevat requesthash, repository, runtime-head SHA, workflowref, run ID/attempt, event en visibility. De workflow maakt `results/SHA256SUMS.txt` en attesteert dat checksumreceipt via GitHub/Sigstore. De validator controleert contract, privacy, hashes, tellingen en de no-media-grens.
 
 ## Security/CI
 

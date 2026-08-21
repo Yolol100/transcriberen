@@ -19,7 +19,6 @@ YT_BULK_SCOPES = {"playlist", "channel_videos", "channel_shorts", "channel_strea
 YT_SORTS = {"relevance", "views", "likes", "comments", "newest", "random"}
 COMMENT_SORTS = {"top", "new"}
 COMMENT_SELECTIONS = {"platform", "knowledge"}
-YOUTUBE_ACCESS_BASES = {"prior-written-permission", "applicable-law-reviewed"}
 ALLOWED_KNOWLEDGE_OWNERS = {
     "webactueel-workflow", "leads", "seo", "design", "elementor",
     "wordpressqualityarchitect", "website-qa-checklist",
@@ -272,11 +271,11 @@ def validate_request(req):
         if basis.lower() in UNVERIFIED_RIGHTS | {"analysis-only", "analysis-paraphrase-only"}:
             raise ValueError("audio fallback requires a concrete authorization/rights_basis")
 
+    # Public YouTube captions/comments are allowed through the anonymous runtime
+    # without a separate legal/access attestation. Keep any supplied value only
+    # as provenance metadata; it is not an execution gate.
     if req.get("mode") == "youtube":
-        access_basis = str(req.get("youtube_access_basis") or "").strip().lower()
-        if access_basis not in YOUTUBE_ACCESS_BASES:
-            raise ValueError("public YouTube automated access requires youtube_access_basis=prior-written-permission or applicable-law-reviewed")
-        req["youtube_access_basis"] = access_basis
+        req["youtube_access_basis"] = str(req.get("youtube_access_basis") or "public-anonymous").strip().lower()
 
     context = req.get("source_context")
     source_set_version = str((context or {}).get("source_set_version", "")).strip()
@@ -288,12 +287,9 @@ def validate_request(req):
     if source_set_version != expected:
         raise ValueError(f"source_context.source_set_version={source_set_version!r} does not match current toolkit source set {expected!r}")
 
-    visibility = str(os.environ.get("GITHUB_REPOSITORY_VISIBILITY", "")).strip().lower()
-    if visibility == "public":
-        if not req["public_request_acknowledged"]:
-            raise ValueError("public GitHub execution requires public_request_acknowledged=true because request data may be visible in public workflow metadata, logs or artifacts")
-        if req["analysis_content_allowed"] or req["reuse_allowed"]:
-            raise ValueError("public GitHub execution may not persist transcript/comment source content; use a private/local runtime for content analysis")
+    # Repository visibility no longer blocks analysis artifacts. Reuse remains
+    # separately gated by rights_basis above; public runs may persist bounded,
+    # task-scoped caption/comment evidence when analysis_content_allowed=true.
     return req
 
 
@@ -318,20 +314,21 @@ def from_dispatch():
         "comment_review_limit": os.environ.get("INPUT_YOUTUBE_COMMENT_REVIEW_LIMIT", "50"),
     }
     keywords = [item.strip() for item in os.environ.get("INPUT_KNOWLEDGE_KEYWORDS", "").split(",") if item.strip()]
+    mode = os.environ.get("INPUT_MODE", "auto")
     return {
         "enabled": True,
         "request_id": f"dispatch-{os.environ.get('GITHUB_RUN_ID', 'manual')}",
         "owner": "webactueel-workflow",
         "project_id": "project-transcriberen",
         "url": os.environ.get("INPUT_URL", ""),
-        "mode": os.environ.get("INPUT_MODE", "auto"),
+        "mode": mode,
         "language": os.environ.get("INPUT_LANGUAGE", "auto"),
         "allow_audio_fallback": as_bool(os.environ.get("INPUT_ALLOW_AUDIO_FALLBACK"), False),
         "audio_access_authorized": as_bool(os.environ.get("INPUT_AUDIO_ACCESS_AUTHORIZED"), False),
-        "analysis_content_allowed": as_bool(os.environ.get("INPUT_ANALYSIS_CONTENT_ALLOWED"), False),
+        "analysis_content_allowed": as_bool(os.environ.get("INPUT_ANALYSIS_CONTENT_ALLOWED"), mode == "youtube"),
         "reuse_allowed": as_bool(os.environ.get("INPUT_REUSE_ALLOWED"), False),
         "rights_basis": os.environ.get("INPUT_RIGHTS_BASIS", "analysis-paraphrase-only"),
-        "youtube_access_basis": os.environ.get("INPUT_YOUTUBE_ACCESS_BASIS", "unverified"),
+        "youtube_access_basis": os.environ.get("INPUT_YOUTUBE_ACCESS_BASIS", "public-anonymous"),
         "public_request_acknowledged": as_bool(os.environ.get("INPUT_PUBLIC_REQUEST_ACKNOWLEDGED"), False),
         "youtube": youtube,
         "knowledge_context": {
