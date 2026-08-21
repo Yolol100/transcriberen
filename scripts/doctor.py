@@ -191,6 +191,8 @@ def check_repository(root: Path, mode: str = "local") -> dict[str, Any]:
         ".github/workflows/doctor.yml": (
             "python scripts/doctor.py --mode ci --json",
             "python -m unittest discover -s tests -p 'test_doctor.py' -v",
+            "post-merge/Repository Doctor",
+            "statuses: write",
         ),
     }
     for relative, needles in workflow_expectations.items():
@@ -230,14 +232,14 @@ def check_repository(root: Path, mode: str = "local") -> dict[str, Any]:
         checks.append(
             _result(
                 "local-ffmpeg",
-                True,
+                ffmpeg is not None,
                 ffmpeg or "ffmpeg not installed; only required for explicitly authorized non-YouTube audio fallback",
                 severity="warning",
             )
         )
 
     errors = [check for check in checks if not check["ok"] and check["severity"] == "error"]
-    warnings = [check for check in checks if check["severity"] == "warning"]
+    warnings = [check for check in checks if not check["ok"] and check["severity"] == "warning"]
     return {
         "schema": "webactueel-transcriberen-doctor/1.0",
         "mode": mode,
@@ -262,9 +264,12 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
         for check in report["checks"]:
-            marker = "PASS" if check["ok"] else "FAIL"
-            if check["severity"] == "warning":
+            if check["ok"]:
+                marker = "PASS"
+            elif check["severity"] == "warning":
                 marker = "WARN"
+            else:
+                marker = "FAIL"
             print(f"[{marker}] {check['name']}: {check['detail']}")
         print(f"doctor: {'OK' if report['ok'] else 'FAILED'}")
     return 0 if report["ok"] else 1
