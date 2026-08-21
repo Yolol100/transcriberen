@@ -43,10 +43,39 @@ PY
 install -m 0755 "$TMP_ROOT/deno" "$BIN_DIR/deno"
 "$BIN_DIR/deno" --version
 
-YT_DLP_VERSION="2026.07.04"
-YT_DLP_SHA256="495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd"
+# Resolve the current official yt-dlp nightly release only long enough to learn
+# the exact immutable tag and digest. The release candidate branch converts this
+# resolution into a reviewed source pin before merge.
+YT_DLP_LATEST_URL="$(curl_https --output /dev/null --write-out '%{url_effective}' \
+  'https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest')"
+case "$YT_DLP_LATEST_URL" in
+  https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/tag/*) ;;
+  *) echo "unexpected yt-dlp nightly release URL: $YT_DLP_LATEST_URL" >&2; exit 1 ;;
+esac
+YT_DLP_VERSION="${YT_DLP_LATEST_URL##*/}"
+if [[ ! "$YT_DLP_VERSION" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]{6}$ ]]; then
+  echo "unexpected yt-dlp nightly tag: $YT_DLP_VERSION" >&2
+  exit 1
+fi
+YT_DLP_RELEASE_BASE="https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/${YT_DLP_VERSION}"
+YT_DLP_CHECKSUMS="$TMP_ROOT/SHA2-256SUMS"
 YT_DLP_DOWNLOAD="$TMP_ROOT/yt-dlp.bin"
-curl_https "https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/yt-dlp" -o "$YT_DLP_DOWNLOAD"
+curl_https "${YT_DLP_RELEASE_BASE}/SHA2-256SUMS" -o "$YT_DLP_CHECKSUMS"
+YT_DLP_SHA256="$(python3 - "$YT_DLP_CHECKSUMS" <<'PY'
+import pathlib
+import re
+import sys
+matches = []
+for line in pathlib.Path(sys.argv[1]).read_text(encoding='utf-8').splitlines():
+    match = re.fullmatch(r'([0-9a-fA-F]{64})\s+\*?yt-dlp', line.strip())
+    if match:
+        matches.append(match.group(1).lower())
+if len(matches) != 1:
+    raise SystemExit(f'expected exactly one yt-dlp checksum, got {len(matches)}')
+print(matches[0])
+PY
+)"
+curl_https "${YT_DLP_RELEASE_BASE}/yt-dlp" -o "$YT_DLP_DOWNLOAD"
 verify_sha256 "$YT_DLP_SHA256" "$YT_DLP_DOWNLOAD"
 install -m 0755 "$YT_DLP_DOWNLOAD" "$BIN_DIR/yt-dlp.bin"
 cat > "$BIN_DIR/yt-dlp" <<'WRAPPER'
@@ -57,6 +86,7 @@ exec "$HERE/yt-dlp.bin" --js-runtimes "deno:$HERE/deno" "$@"
 WRAPPER
 chmod +x "$BIN_DIR/yt-dlp"
 "$BIN_DIR/yt-dlp" --version
+printf 'yt-dlp=%s\nsha256=%s\n' "$YT_DLP_VERSION" "$YT_DLP_SHA256" > "$ROOT/tools/yt-dlp-resolution.txt"
 
 if [[ "$INSTALL_WHISPER" == "true" ]]; then
   WHISPER_VERSION="v1.9.2"
