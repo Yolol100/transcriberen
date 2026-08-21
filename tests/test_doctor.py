@@ -54,6 +54,10 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(1, report["warning_count"])
         self.assertTrue(report["ok"])
 
+    def test_required_files_cover_doctor_followup_and_lock_audit(self):
+        self.assertIn("scripts/publish_ci_status.py", doctor.REQUIRED_FILES)
+        self.assertIn(".github/workflows/lock-audit.yml", doctor.REQUIRED_FILES)
+
     def test_shell_assignment_is_exact(self):
         text = 'A="one"\nYT_DLP_VERSION="2026.08.20.234504"\n'
         self.assertEqual("2026.08.20.234504", doctor._shell_assignment(text, "YT_DLP_VERSION"))
