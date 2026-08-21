@@ -39,7 +39,9 @@ class DoctorTests(unittest.TestCase):
                 path.write_text(
                     'YT_DLP_SHA256="8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93"\n'
                     'DENO_SHA256="8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530"\n'
-                    'sha256sum -c -\n--js-runtimes "deno:$HERE/deno"\n',
+                    'actual="$(sha256sum "$file" | awk \'{print $1}\')"\n'
+                    'if [[ "$actual" != "$expected" ]]; then return 1; fi\n'
+                    '--js-runtimes "deno:$HERE/deno"\n',
                     encoding="utf-8",
                 )
             else:
