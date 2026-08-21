@@ -44,6 +44,8 @@ FORBIDDEN_RUNTIME_TERMS = {
     "ffmpeg",
     "trafilatura",
 }
+PROJECT_TRUTH_KEYS = {"owner_skill", "owner_mode", "project_id", "source_set_version"}
+PROJECT_TRUTH_MARKERS = {"project-transcriberen", "2.2.0-captions-only"}
 
 
 def run_checks(root: Path = ROOT) -> dict:
@@ -58,13 +60,33 @@ def run_checks(root: Path = ROOT) -> dict:
     contract_path = root / "toolkit-contract.json"
     if contract_path.is_file():
         contract = json.loads(contract_path.read_text(encoding="utf-8"))
-        if contract.get("source_set_version") != "2.2.0-captions-only":
-            failures.append("toolkit source_set_version is not captions-only")
+        if contract.get("schema_version") != "2.1":
+            failures.append("toolkit schema_version must be 2.1")
+        if contract.get("capability_id") != "public-youtube-caption-acquisition":
+            failures.append("toolkit capability_id mismatch")
         if contract.get("runtime_target") != "self-hosted-or-local-direct-network":
             failures.append("runtime target must be self-hosted/local direct network")
+        leaked_keys = sorted(PROJECT_TRUTH_KEYS.intersection(contract))
+        if leaked_keys:
+            failures.append("project truth keys in toolkit contract: " + ", ".join(leaked_keys))
         ids = {tool.get("id") for tool in contract.get("tools", [])}
         if ids != {"yt-dlp", "deno-ejs-runtime"}:
             failures.append(f"unexpected tool set: {sorted(ids)}")
+
+    runtime_files = (
+        "toolkit-contract.json",
+        "scripts/resolve_request.py",
+        "scripts/captions_runtime.py",
+        "scripts/validate_result.py",
+    )
+    for relative in runtime_files:
+        path = root / relative
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8").casefold()
+        for marker in PROJECT_TRUTH_MARKERS:
+            if marker in text:
+                failures.append(f"project truth marker {marker!r} remains in {relative}")
 
     for relative in ("scripts/resolve_request.py", "scripts/captions_runtime.py", ".github/workflows/transcribe.yml"):
         path = root / relative

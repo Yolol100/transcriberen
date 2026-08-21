@@ -281,7 +281,7 @@ def runtime_provenance() -> dict:
 
 def base_result(request: dict) -> dict:
     return {
-        "schema_version": "2.0",
+        "schema_version": "2.1",
         "request_id": request["request_id"],
         "status": "error",
         "source": {
@@ -292,10 +292,6 @@ def base_result(request: dict) -> dict:
         "caption": None,
         "transcript_sha256": None,
         "transcript_chars": 0,
-        "source_context": {
-            "project_id": request["project_id"],
-            "source_set_version": request["source_set_version"],
-        },
         "runtime_provenance": runtime_provenance(),
         "media_downloaded": False,
     }

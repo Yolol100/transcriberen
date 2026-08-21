@@ -50,7 +50,7 @@ jobs:
           python -m unittest discover -s tests -v
           python scripts/doctor.py --mode ci --json
 
-      - name: Validate captions-only toolkit contract
+      - name: Validate captions-only capability contract
         shell: bash
         run: |
           set -euo pipefail
@@ -59,11 +59,12 @@ jobs:
           import pathlib
 
           contract = json.load(open('toolkit-contract.json', encoding='utf-8'))
-          assert contract['schema_version'] == '2.0'
-          assert contract['source_set_version'] == '2.2.0-captions-only'
-          assert contract['owner_skill'] == 'webactueel-workflow'
-          assert contract['project_id'] == 'project-transcriberen'
+          assert contract['schema_version'] == '2.1'
+          assert contract['capability_id'] == 'public-youtube-caption-acquisition'
+          assert contract['repository'] == 'Yolol100/transcriberen'
           assert contract['runtime_target'] == 'self-hosted-or-local-direct-network'
+          for key in ('owner_skill', 'owner_mode', 'project_id', 'source_set_version'):
+              assert key not in contract, f'project/skill truth leaked into capability contract: {key}'
           for key in ('requires_account', 'requires_api_key', 'requires_mcp'):
               assert contract.get(key) is False
 
@@ -82,6 +83,17 @@ jobs:
           }
           for path in forbidden:
               assert not pathlib.Path(path).exists(), path
+
+          runtime_paths = [
+              pathlib.Path('toolkit-contract.json'),
+              pathlib.Path('scripts/resolve_request.py'),
+              pathlib.Path('scripts/captions_runtime.py'),
+              pathlib.Path('scripts/validate_result.py'),
+          ]
+          for path in runtime_paths:
+              text = path.read_text(encoding='utf-8').casefold()
+              for marker in ('project-transcriberen', '2.2.0-captions-only'):
+                  assert marker not in text, f'project truth marker {marker!r} leaked into {path}'
 
           resolver = pathlib.Path('scripts/resolve_request.py').read_text(encoding='utf-8')
           assert 'ALLOWED_INPUT_KEYS = {"enabled", "request_id", "url", "language"}' in resolver

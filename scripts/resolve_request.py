@@ -15,16 +15,6 @@ ALLOWED_INPUT_KEYS = {"enabled", "request_id", "url", "language"}
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
 
 
-def current_contract() -> dict:
-    data = json.loads((ROOT / "toolkit-contract.json").read_text(encoding="utf-8"))
-    if data.get("project_id") != "project-transcriberen":
-        raise ValueError("toolkit contract project_id mismatch")
-    version = str(data.get("source_set_version") or "").strip()
-    if not version:
-        raise ValueError("toolkit contract source_set_version is required")
-    return data
-
-
 def parse_youtube_url(raw: str) -> tuple[str, str, str]:
     value = str(raw or "").strip()
     parts = urlsplit(value)
@@ -74,17 +64,14 @@ def validate_request(raw: dict) -> dict:
         raise ValueError("invalid language")
 
     video_id, source_type, normalized_url = parse_youtube_url(raw.get("url"))
-    contract = current_contract()
     return {
-        "schema_version": "2.0",
+        "schema_version": "2.1",
         "enabled": True,
         "request_id": request_id,
         "url": normalized_url,
         "video_id": video_id,
         "source_type": source_type,
         "language": language,
-        "project_id": contract["project_id"],
-        "source_set_version": contract["source_set_version"],
     }
 
 
@@ -105,7 +92,6 @@ def main() -> None:
         "request_id": resolved["request_id"],
         "source_type": resolved["source_type"],
         "video_id": resolved["video_id"],
-        "source_set_version": resolved["source_set_version"],
     }))
 
 

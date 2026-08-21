@@ -14,15 +14,10 @@ ALLOWED_STATUSES = {"ok", "skipped_no_captions", "access_blocked", "error"}
 MEDIA_EXTENSIONS = {".mp4", ".webm", ".mkv", ".mov", ".avi", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac"}
 
 
-def contract_version() -> str:
-    contract = json.loads((ROOT / "toolkit-contract.json").read_text(encoding="utf-8"))
-    return str(contract["source_set_version"])
-
-
 def validate(path: Path) -> None:
     data = json.loads(path.read_text(encoding="utf-8"))
-    if data.get("schema_version") != "2.0":
-        raise ValueError("result schema_version must be 2.0")
+    if data.get("schema_version") != "2.1":
+        raise ValueError("result schema_version must be 2.1")
     if data.get("status") not in ALLOWED_STATUSES:
         raise ValueError("invalid result status")
 
@@ -33,12 +28,8 @@ def validate(path: Path) -> None:
         raise ValueError("invalid source.video_id")
     if not str(source.get("url") or "").startswith("https://www.youtube.com/"):
         raise ValueError("source.url must be normalized YouTube HTTPS")
-
-    context = data.get("source_context") or {}
-    if context.get("project_id") != "project-transcriberen":
-        raise ValueError("source_context.project_id mismatch")
-    if context.get("source_set_version") != contract_version():
-        raise ValueError("source_set_version does not match toolkit contract")
+    if "source_context" in data or "project_id" in data or "source_set_version" in data:
+        raise ValueError("project truth must not be embedded in runtime results")
     if data.get("media_downloaded") is not False:
         raise ValueError("media_downloaded must be false")
 
