@@ -210,12 +210,11 @@ def comments_for_with_client_fallback(url, req, source_comment_count=None):
 
 
 def _next_nonempty_is_timing(lines, index):
-    for following in lines[index + 1:]:
-        candidate = following.strip()
-        if not candidate:
-            continue
-        return bool(_TIMING_RE.search(candidate))
-    return False
+    next_index = index + 1
+    if next_index >= len(lines):
+        return False
+    candidate = lines[next_index].strip()
+    return bool(candidate and _TIMING_RE.search(candidate))
 
 
 def normalize_subtitles_hardened(path):
