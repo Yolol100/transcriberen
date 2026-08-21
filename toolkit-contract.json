@@ -1,10 +1,7 @@
 {
-  "schema_version": "2.0",
-  "owner_skill": "webactueel-workflow",
-  "owner_mode": "transcribeer",
-  "project_id": "project-transcriberen",
+  "schema_version": "2.1",
+  "capability_id": "public-youtube-caption-acquisition",
   "repository": "Yolol100/transcriberen",
-  "source_set_version": "2.2.0-captions-only",
   "evidence_role": "controlled_runtime_public_youtube_caption_acquisition",
   "requires_account": false,
   "requires_api_key": false,
@@ -35,6 +32,6 @@
     "No comments, channel or playlist discovery, search, ranking, topic filtering, engagement data, knowledge handoff, article/feed/sitemap extraction, audio fallback or Whisper exists in this runtime.",
     "No cookies, login, proxy, CAPTCHA bypass, PO token or media download is used.",
     "Only minimal caption provenance is persisted; raw yt-dlp metadata is not persisted.",
-    "All output is controlled_runtime evidence."
+    "Project identity, live source-set versions, project routing and project policy are supplied and owned outside this repository."
   ]
 }
