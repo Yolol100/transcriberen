@@ -75,6 +75,48 @@ class TopicFilterTests(unittest.TestCase):
         }
         self.assertEqual(runtime_topic_filter._topic_aware_playlist_end(req), 7)
 
+    def test_metadata_fallback_tries_default_then_anonymous_client(self):
+        with patch.object(
+            runtime_topic_filter,
+            "_ORIGINAL_METADATA_FOR",
+            side_effect=[RuntimeError("confirm you're not a bot"), {"id": "video-1"}],
+        ) as mocked:
+            result = runtime_topic_filter.metadata_for_with_client_fallback("https://www.youtube.com/watch?v=video-1")
+        self.assertEqual(result["id"], "video-1")
+        self.assertEqual(mocked.call_args_list[0].kwargs["player_client"], None)
+        self.assertEqual(mocked.call_args_list[1].kwargs["player_client"], "tv")
+
+    def test_explicit_metadata_client_does_not_expand_fallbacks(self):
+        with patch.object(runtime_topic_filter, "_ORIGINAL_METADATA_FOR", return_value={"id": "x"}) as mocked:
+            result = runtime_topic_filter.metadata_for_with_client_fallback(
+                "https://www.youtube.com/watch?v=x", player_client="mweb"
+            )
+        self.assertEqual(result["id"], "x")
+        mocked.assert_called_once_with("https://www.youtube.com/watch?v=x", player_client="mweb")
+
+    def test_comment_fallback_preserves_bounds_and_uses_anonymous_client(self):
+        req = {
+            "youtube": {
+                "comment_sort": "top",
+                "max_comments": "20",
+                "include_replies": False,
+            }
+        }
+        payload = {
+            "comment_count": 1,
+            "comments": [{"id": "c1", "parent": "root", "text": "Useful SEO observation", "like_count": 2}],
+        }
+        with patch.object(runtime_topic_filter, "_ORIGINAL_COMMENTS_FOR", side_effect=RuntimeError("bot")), \
+             patch.object(runtime_topic_filter.youtube_runtime, "load_json", return_value=payload) as load_json:
+            comments, summary = runtime_topic_filter.comments_for_with_client_fallback(
+                "https://www.youtube.com/watch?v=x", req, 1
+            )
+        self.assertEqual(len(comments), 1)
+        self.assertEqual(summary["limit"], 20)
+        command = load_json.call_args.args[0]
+        self.assertIn("player_client=tv", " ".join(command))
+        self.assertIn("max_comments=20,20,0,0,1", " ".join(command))
+
     def test_resolver_accepts_comma_separated_keywords_and_deduplicates(self):
         req = {"youtube": {"include_keywords": "cold-email, technical seo, COLD_EMAIL, cold email"}}
         result = resolve_request_hardened._normalize_include_keywords(req)
