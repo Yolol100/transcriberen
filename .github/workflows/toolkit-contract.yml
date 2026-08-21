@@ -115,6 +115,7 @@ jobs:
               '--js-runtimes "deno:$HERE/deno"',
               'actual="$(sha256sum "$file" | awk',
               'if [[ "$actual" != "$expected" ]]',
+              'deno_reported_version()',
           ):
               assert needle in installer
 
@@ -138,7 +139,7 @@ jobs:
           set -euo pipefail
           bash scripts/install_tools.sh
           test "$(tools/bin/yt-dlp --version)" = '2026.08.20.234504'
-          tools/bin/deno --version | head -n 1 | grep -Fx 'deno 2.9.5'
+          test "$(tools/bin/deno --version | head -n 1 | awk '{print $2}')" = '2.9.5'
 
       - name: Create deterministic CI provenance receipt
         shell: bash
