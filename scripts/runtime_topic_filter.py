@@ -238,7 +238,7 @@ def normalize_subtitles_hardened(path):
         if line in _BLOCK_HEADERS or line == "NOTE" or line.startswith(("NOTE ", "NOTE\t")):
             skip_block = True
             continue
-        if _TIMING_RE.search(line) or line.isdigit():
+        if _TIMING_RE.search(line):
             continue
         if _next_nonempty_is_timing(lines, index):
             continue
