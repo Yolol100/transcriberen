@@ -14,7 +14,7 @@ SPEC.loader.exec_module(m)
 class ResultContractTests(unittest.TestCase):
     def base(self, status):
         return {
-            "schema_version": "2.0",
+            "schema_version": "2.1",
             "request_id": "request-001",
             "status": status,
             "source": {
@@ -25,10 +25,6 @@ class ResultContractTests(unittest.TestCase):
             "caption": None,
             "transcript_sha256": None,
             "transcript_chars": 0,
-            "source_context": {
-                "project_id": "project-transcriberen",
-                "source_set_version": "2.2.0-captions-only",
-            },
             "runtime_provenance": {"execution_target": "test"},
             "media_downloaded": False,
         }
@@ -56,6 +52,12 @@ class ResultContractTests(unittest.TestCase):
         result["transcript_sha256"] = hashlib.sha256(text.encode()).hexdigest()
         result["transcript_chars"] = len(text)
         self.run_in_temp(result, text)
+
+    def test_project_truth_is_rejected(self):
+        result = self.base("skipped_no_captions")
+        result["source_context"] = {"project_id": "example-project", "source_set_version": "example-version"}
+        with self.assertRaisesRegex(ValueError, "project truth"):
+            self.run_in_temp(result)
 
     def test_skip_rejects_transcript_file(self):
         with self.assertRaises(ValueError):
