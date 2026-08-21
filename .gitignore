@@ -1,6 +1,8 @@
 tools/
 results/
+results.previous.*/
 resolved-request.json
+.local-runtime-venv/
 __pycache__/
 *.pyc
 *.wav
