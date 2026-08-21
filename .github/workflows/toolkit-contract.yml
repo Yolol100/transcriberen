@@ -64,7 +64,7 @@ jobs:
 
           contract = json.load(open('toolkit-contract.json', encoding='utf-8'))
           assert contract['schema_version'] == '1.2'
-          assert contract['source_set_version'] == '2.0.0-audit-hardening'
+          assert contract['source_set_version'] == '2.1.0-public-analysis'
           assert contract['owner_skill'] == 'webactueel-workflow'
           assert contract['project_id'] == 'project-transcriberen'
           for key in ('requires_account', 'requires_api_key', 'requires_mcp'):

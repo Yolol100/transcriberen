@@ -4,7 +4,7 @@
   "owner_mode": "transcribeer",
   "project_id": "project-transcriberen",
   "repository": "Yolol100/transcriberen",
-  "source_set_version": "2.0.0-audit-hardening",
+  "source_set_version": "2.1.0-public-analysis",
   "evidence_role": "controlled_runtime_public_source_discovery_caption_comment_acquisition_and_transcription",
   "requires_account": false,
   "requires_api_key": false,

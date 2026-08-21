@@ -7,7 +7,7 @@ Controlled runtime voor Project Transcriberen. De repository verzamelt bronbewij
 - Publieke YouTube: metadata + precies één gekozen publieke captiontrack + optionele publieke comments. **Nooit audio/video-download.**
 - Geen cookies, login, CAPTCHA-, DRM-, betaalmuur- of leeftijdscontrole-bypass.
 - Publieke captions, metadata en comments mogen accountloos worden opgehaald zonder voorafgaande `prior-written-permission`/`applicable-law-reviewed` execution gate.
-- `source_context.source_set_version` moet exact `2.0.0-audit-hardening` zijn.
+- `source_context.source_set_version` moet exact `2.1.0-public-analysis` zijn.
 - Een publieke GitHub-run mag bounded transcript/comment-analysisartifacts bewaren wanneer `analysis_content_allowed=true`. Dit geeft geen hergebruik- of publicatierecht; `reuse_allowed` blijft afzonderlijk begrensd door `rights_basis`.
 
 ## Invocation
