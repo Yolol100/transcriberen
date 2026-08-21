@@ -34,6 +34,11 @@ download() {
     "$url" -o "$output"
 }
 
+deno_reported_version() {
+  local executable="$1"
+  "$executable" --version | head -n 1 | awk '$1 == "deno" {print $2}'
+}
+
 SYSTEM_YT_DLP="$(command -v yt-dlp || true)"
 if [[ -n "$SYSTEM_YT_DLP" && "$("$SYSTEM_YT_DLP" --version)" == "$YT_DLP_VERSION" ]]; then
   ln -sfn "$SYSTEM_YT_DLP" "$BIN_DIR/yt-dlp.bin"
@@ -46,7 +51,7 @@ else
 fi
 
 SYSTEM_DENO="$(command -v deno || true)"
-if [[ -n "$SYSTEM_DENO" ]] && "$SYSTEM_DENO" --version | head -n 1 | grep -Fx "deno $DENO_VERSION" >/dev/null; then
+if [[ -n "$SYSTEM_DENO" && "$(deno_reported_version "$SYSTEM_DENO")" == "$DENO_VERSION" ]]; then
   ln -sfn "$SYSTEM_DENO" "$BIN_DIR/deno"
 else
   download \
@@ -84,7 +89,7 @@ printf 'yt-dlp wrapper version: '
 
 test "$("$BIN_DIR/yt-dlp.bin" --version)" = "$YT_DLP_VERSION"
 test "$("$BIN_DIR/yt-dlp" --version)" = "$YT_DLP_VERSION"
-"$BIN_DIR/deno" --version | head -n 1 | grep -Fx "deno $DENO_VERSION" >/dev/null
+test "$(deno_reported_version "$BIN_DIR/deno")" = "$DENO_VERSION"
 
 if [[ -n "${GITHUB_PATH:-}" ]]; then
   printf '%s\n' "$BIN_DIR" >> "$GITHUB_PATH"
