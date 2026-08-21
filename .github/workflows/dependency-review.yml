@@ -30,29 +30,41 @@ jobs:
           fail-on-severity: high
       - name: Record native Dependency Review capability gap
         if: steps.native_dependency_review.outcome == 'failure'
-        shell: bash
-        run: |
-          echo 'GitHub native Dependency Review is unavailable until the repository Dependency graph is enabled.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'The exact-hash lock audit and pip-audit remain enforcing fallbacks; native dependency-diff review is an external repository-admin gate.' >> "$GITHUB_STEP_SUMMARY"
+        run: echo 'GitHub native Dependency Review is unavailable; captions-only tool-version verification remains enforcing.' >> "$GITHUB_STEP_SUMMARY"
 
-  pip-audit:
+  tool-pins:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Audit locked Python dependency tree
-        uses: pypa/gh-action-pip-audit@1220774d901786e6f652ae159f7b6bc8fea6d266 # v1.1.0
-        with:
-          inputs: requirements.lock
-          vulnerability-service: PyPI
-          require-hashes: true
-          no-deps: true
+      - name: Verify runtime dependency surface and versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import pathlib
+
+          contract = json.load(open('toolkit-contract.json', encoding='utf-8'))
+          tools = {tool['id']: tool for tool in contract['tools']}
+          assert set(tools) == {'yt-dlp', 'deno-ejs-runtime'}
+          bootstrap = pathlib.Path('scripts/install_tools.sh').read_text(encoding='utf-8')
+          expected = {
+              'YT_DLP_VERSION': tools['yt-dlp']['version'],
+              'DENO_VERSION': tools['deno-ejs-runtime']['version'],
+          }
+          for name, value in expected.items():
+              assert f'{name}="{value}"' in bootstrap, (name, value)
+          for removed in ('requirements.in', 'requirements.txt', 'requirements.lock'):
+              assert not pathlib.Path(removed).exists(), removed
+          print('dependency-surface: OK')
+          PY
 
   publish-main-status:
-    needs: pip-audit
+    needs: tool-pins
     if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -67,4 +79,4 @@ jobs:
       - name: Publish exact main Dependency Audit status
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/publish_ci_status.py --context 'post-merge/Dependency Audit' --result '${{ needs.pip-audit.result }}'
+        run: python scripts/publish_ci_status.py --context 'post-merge/Dependency Audit' --result '${{ needs.tool-pins.result }}'
