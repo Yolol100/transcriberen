@@ -31,6 +31,18 @@ class SubtitleNormalizationRegressionTests(unittest.TestCase):
             normalized = runtime_topic_filter.normalize_subtitles_hardened(path)
         self.assertEqual(normalized, "First cue line one\nFirst cue line two\nSecond cue")
 
+    def test_numeric_caption_text_is_preserved(self):
+        payload = (
+            "WEBVTT\n\n"
+            "00:00:00.000 --> 00:00:01.000\n"
+            "2026\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "numeric.vtt"
+            path.write_text(payload, encoding="utf-8")
+            normalized = runtime_topic_filter.normalize_subtitles_hardened(path)
+        self.assertEqual(normalized, "2026")
+
 
 if __name__ == "__main__":
     unittest.main()
