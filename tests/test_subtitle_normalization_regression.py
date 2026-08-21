@@ -43,6 +43,30 @@ class SubtitleNormalizationRegressionTests(unittest.TestCase):
             normalized = runtime_topic_filter.normalize_subtitles_hardened(path)
         self.assertEqual(normalized, "2026")
 
+    def test_metadata_looking_words_inside_cue_are_preserved(self):
+        payload = (
+            "WEBVTT\n"
+            "Kind: captions\n"
+            "Language: en\n\n"
+            "00:00:00.000 --> 00:00:02.000\n"
+            "NOTE this is spoken\n"
+            "Language: Dutch\n"
+            "STYLE\n"
+            "REGION\n\n"
+            "NOTE outside-cue metadata\n"
+            "this metadata is not caption text\n\n"
+            "00:00:02.000 --> 00:00:03.000\n"
+            "Final cue\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "context.vtt"
+            path.write_text(payload, encoding="utf-8")
+            normalized = runtime_topic_filter.normalize_subtitles_hardened(path)
+        self.assertEqual(
+            normalized,
+            "NOTE this is spoken\nLanguage: Dutch\nSTYLE\nREGION\nFinal cue",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
