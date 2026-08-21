@@ -2,13 +2,15 @@
 """Runtime entrypoint that adds explainable metadata topic filtering.
 
 The canonical extraction policy remains scripts/runtime.py. This wrapper adds
-metadata topic filtering, bounded accountless InnerTube/yt-dlp fallback and
-production subtitle-normalization hardening before calling that runtime.
+caption-first public InnerTube clients, metadata topic filtering, bounded
+accountless yt-dlp fallback and production subtitle-normalization hardening
+before calling that runtime.
 """
 import json
 import re
 from pathlib import Path
 
+import caption_client_profiles
 import innertube_runtime
 import youtube_runtime
 
@@ -98,13 +100,14 @@ def _innertube_metadata_complete_for_request(meta, yt):
 
 
 def metadata_for_with_client_fallback(url, player_client=None, youtube_options=None):
-    """Prefer direct public InnerTube, then preserve bounded anonymous yt-dlp fallbacks."""
+    """Prefer caption-first public InnerTube, then bounded anonymous yt-dlp."""
     if player_client is not None:
         return _ORIGINAL_METADATA_FOR(url, player_client=player_client)
 
     last_error = None
     try:
-        meta = innertube_runtime.metadata_for(
+        meta = caption_client_profiles.metadata_for(
+            innertube_runtime,
             url,
             include_engagement=_needs_engagement_metadata(youtube_options),
         )
@@ -125,12 +128,12 @@ def metadata_for_with_client_fallback(url, player_client=None, youtube_options=N
 
 
 def download_caption_with_provider_fallback(url, meta, preferred_language="auto"):
-    """Prefer signed InnerTube captions, then preserve the reviewed yt-dlp cascade."""
+    """Prefer signed caption-first InnerTube tracks, then the reviewed yt-dlp cascade."""
     last_error = None
     inner_meta = meta if meta.get("_innertube_player_client") else None
     if inner_meta is None:
         try:
-            inner_meta = innertube_runtime.metadata_for(url)
+            inner_meta = caption_client_profiles.metadata_for(innertube_runtime, url)
         except Exception as exc:
             last_error = exc
     if inner_meta is not None:
@@ -255,6 +258,7 @@ def normalize_subtitles_hardened(path):
 
 def collect_with_topic_filter(req, results_dir):
     innertube_runtime.reset_diagnostics()
+    caption_client_profiles.apply(innertube_runtime)
     youtube_options = req.get("youtube", {})
 
     def request_metadata(url, player_client=None):
@@ -283,8 +287,9 @@ def collect_with_topic_filter(req, results_dir):
     index["topic_filter_basis"] = "metadata:title+description+tags+categories" if keywords else None
     index["topic_filter_normalization"] = "casefold+separator-to-space+token-match" if keywords else None
     index["provider_strategy"] = [
-        "innertube-player:android",
-        "innertube-player:ios",
+        "innertube-player-host:youtubei.googleapis.com",
+        "innertube-player-host:www.youtube.com",
+        *[f"innertube-player:{client.lower()}" for client in caption_client_profiles.PLAYER_CLIENT_ORDER],
         "innertube-comments:web-next",
         "yt-dlp:default",
         *[f"yt-dlp:{client}" for client in youtube_runtime.SUBTITLE_CLIENT_FALLBACKS],
