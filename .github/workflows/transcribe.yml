@@ -135,6 +135,7 @@ jobs:
       id-token: write
       attestations: write
       artifact-metadata: write
+      statuses: write
     timeout-minutes: 330
     concurrency:
       group: transcribe-${{ needs.resolve.outputs.request_id }}
@@ -238,3 +239,9 @@ jobs:
           path: results/
           retention-days: 3
           if-no-files-found: warn
+
+      - name: Publish queue-run status and run URL
+        if: always() && github.event_name == 'push'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/publish_ci_status.py --context 'runtime/Transcribe Public Source' --result '${{ job.status }}'
