@@ -21,6 +21,20 @@ De runtime ondersteunt vier uitvoerroutes met hetzelfde requestcontract:
 
 Requestbestanden voor de queue zijn append-only: de bestandsnaam moet gelijk zijn aan `request_id`, een run accepteert precies één nieuw JSON-bestand en live requeststate wordt nooit naar `main` gemerged. De runtime blijft een evidence-adapter; `webactueel-workflow` houdt workflow- en kenniseigenaarschap.
 
+### Lokale/private YouTube-uitvoering
+
+GitHub-hosted cloud-IP's kunnen door YouTube accountloos worden geblokkeerd terwijl dezelfde publieke bron vanaf een normale lokale verbinding wel bereikbaar is. Gebruik in dat geval exact hetzelfde request via de lokale runner; dit is geen alternatieve scraper maar dezelfde resolver, runtime, nightly-pin, validator en checksumroute.
+
+Vereisten: Linux x86_64 of WSL2/Ubuntu, Python 3.12+ met `venv`, `curl` en standaard GNU-tools. Vanaf de repositoryroot:
+
+```bash
+bash scripts/run_local.sh requests/transcribe.json
+```
+
+De runner verwijdert proxy-omgevingsvariabelen, maakt een eigen `.local-runtime-venv`, installeert de gehashte Python-lock en de gereviewde yt-dlp/Deno-pins, valideert het request, voert de runtime uit en valideert daarna `results/result.json`. Een bestaande `results/` map wordt eerst als `results.previous.<UTC-timestamp>/` bewaard. De output blijft dus lokaal en controleerbaar.
+
+Voor WSL kan hetzelfde commando in de Ubuntu-shell worden uitgevoerd. Er worden ook lokaal geen cookies, accounts, proxy's of YouTube-media gebruikt. Als YouTube de lokale verbinding eveneens blokkeert, blijft de uitkomst `access_blocked`.
+
 ## YouTube-scopes
 
 `video`, `short`, `search`, `playlist`, `channel_videos`, `channel_shorts`, `channel_streams`, `channel_all`.
