@@ -69,6 +69,10 @@ jobs:
           assert contract['project_id'] == 'project-transcriberen'
           for key in ('requires_account', 'requires_api_key', 'requires_mcp'):
               assert contract.get(key) is False
+          yt_tool = next(tool for tool in contract['tools'] if tool['id'] == 'yt-dlp')
+          assert yt_tool['version'] == '2026.08.20.234504'
+          assert yt_tool['sha256'] == '8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93'
+          assert yt_tool['release_channel'] == 'nightly'
 
           ids = [tool['id'] for tool in contract['tools']]
           assert len(ids) == len(set(ids))
@@ -120,9 +124,22 @@ jobs:
               assert needle in runtime
 
           tool_bootstrap = pathlib.Path('scripts/install_tools.sh').read_text(encoding='utf-8')
-          assert 'yt-dlp/yt-dlp-nightly-builds/releases/latest' in tool_bootstrap
-          assert 'SHA2-256SUMS' in tool_bootstrap
-          assert 'YT_DLP_SHA256' in tool_bootstrap
+          assert 'YT_DLP_VERSION="2026.08.20.234504"' in tool_bootstrap
+          assert 'YT_DLP_SHA256="8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93"' in tool_bootstrap
+          assert 'yt-dlp/yt-dlp-nightly-builds/releases/download/${YT_DLP_VERSION}/yt-dlp' in tool_bootstrap
+          assert 'releases/latest' not in tool_bootstrap
+
+          security = pathlib.Path('SECURITY.md').read_text(encoding='utf-8')
+          assert 'analysis_content_allowed=true' in security
+          assert 'public-anonymous' in security
+          assert 'previously reviewed access basis is recorded' not in security
+          assert 'never persist raw transcript/comment content' not in security
+
+          threat = pathlib.Path('THREAT-MODEL.md').read_text(encoding='utf-8')
+          assert 'analysis_content_allowed=true' in threat
+          assert '`youtube_access_basis` is provenance metadata' in threat
+          assert 'fails closed unless a reviewed access basis is supplied' not in threat
+          assert 'cannot persist raw content' not in threat
 
           workflow = pathlib.Path('.github/workflows/transcribe.yml').read_text(encoding='utf-8')
           for needle in (
@@ -170,23 +187,13 @@ jobs:
         with:
           subject-path: ci-provenance.txt
 
-      - name: Verify yt-dlp nightly binary and Deno route
+      - name: Verify pinned yt-dlp nightly binary and Deno route
         shell: bash
         run: |
           set -euo pipefail
           bash scripts/install_tools.sh false
-          YT_DLP_VERSION="$(tools/bin/yt-dlp --version)"
-          [[ "$YT_DLP_VERSION" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]{6}$ ]]
+          test "$(tools/bin/yt-dlp --version)" = '2026.08.20.234504'
           tools/bin/deno --version | grep -F 'deno 2.9.5'
-          cat tools/yt-dlp-resolution.txt
-
-      - name: Upload resolved nightly evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: yt-dlp-nightly-resolution
-          path: tools/yt-dlp-resolution.txt
-          retention-days: 1
-          if-no-files-found: error
 
       - name: Verify Trafilatura runtime
         run: python -c "import trafilatura; assert trafilatura.__version__ == '2.1.0'; print(trafilatura.__version__)"
