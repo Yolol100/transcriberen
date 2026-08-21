@@ -28,12 +28,14 @@ REQUIRED_FILES = (
     ".github/REPOSITORY-GOVERNANCE.md",
     ".github/workflows/codeql.yml",
     ".github/workflows/dependency-review.yml",
+    ".github/workflows/doctor.yml",
+    ".github/workflows/lock-audit.yml",
     ".github/workflows/toolkit-contract.yml",
     ".github/workflows/transcribe.yml",
     ".github/workflows/transcribe-self-hosted.yml",
     ".github/workflows/transcribe-readback-bridge.yml",
-    ".github/workflows/doctor.yml",
     "scripts/install_tools.sh",
+    "scripts/publish_ci_status.py",
     "scripts/resolve_request.py",
     "scripts/resolve_request_hardened.py",
     "scripts/runtime.py",
@@ -193,6 +195,11 @@ def check_repository(root: Path, mode: str = "local") -> dict[str, Any]:
             "python -m unittest discover -s tests -p 'test_doctor.py' -v",
             "post-merge/Repository Doctor",
             "statuses: write",
+        ),
+        ".github/workflows/lock-audit.yml": (
+            "requirements.generated.lock",
+            "--require-hashes",
+            "diff -u requirements.lock requirements.generated.lock",
         ),
     }
     for relative, needles in workflow_expectations.items():
