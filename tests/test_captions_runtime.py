@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import pathlib
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -26,6 +27,16 @@ class CaptionsRuntimeTests(unittest.TestCase):
         }
         self.assertEqual(m.choose_caption_track(meta), {"language": "en", "kind": "automatic"})
 
+    def test_exact_requested_automatic_beats_broader_manual_family(self):
+        meta = {
+            "subtitles": {"en": [{"url": "https://www.youtube.com/api/timedtext?lang=en"}]},
+            "automatic_captions": {"en-US": [{"url": "https://www.youtube.com/api/timedtext?lang=en-US&kind=asr"}]},
+        }
+        self.assertEqual(
+            m.choose_caption_track(meta, "en-US"),
+            {"language": "en-US", "kind": "automatic"},
+        )
+
     def test_translated_tracks_are_not_selected(self):
         meta = {
             "automatic_captions": {
@@ -40,6 +51,30 @@ class CaptionsRuntimeTests(unittest.TestCase):
 
     def test_access_block_is_classified(self):
         self.assertEqual(m.classify_failure("Sign in to confirm you're not a bot"), "access_blocked")
+
+    def test_access_block_on_successful_metadata_exit_is_not_misreported_as_no_captions(self):
+        completed = subprocess.CompletedProcess(
+            ["yt-dlp"],
+            0,
+            stdout=json.dumps({"subtitles": {}, "automatic_captions": {}}),
+            stderr="WARNING: Sign in to confirm you're not a bot",
+        )
+        with mock.patch.object(m, "run", return_value=completed):
+            with self.assertRaisesRegex(RuntimeError, "^access_blocked::"):
+                m.load_metadata("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+
+    def test_warnings_are_not_suppressed(self):
+        self.assertNotIn("--no-warnings", m.yt_base())
+
+    def test_deno_version_parses_release_suffix(self):
+        completed = subprocess.CompletedProcess(
+            ["deno", "--version"],
+            0,
+            stdout="deno 2.9.5 (stable, release, x86_64-unknown-linux-gnu)\nv8 14.7.0\ntypescript 5.9.2\n",
+            stderr="",
+        )
+        with mock.patch.object(m, "run", return_value=completed):
+            self.assertEqual(m.deno_version(), "2.9.5")
 
     def test_vtt_parser_removes_rolling_overlap(self):
         with tempfile.TemporaryDirectory() as td:

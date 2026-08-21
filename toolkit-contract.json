@@ -13,24 +13,27 @@
     {
       "id": "yt-dlp",
       "version": "2026.08.20.234504",
+      "sha256": "8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93",
       "release_channel": "nightly",
-      "provisioning": "dedicated-runner prerequisite",
+      "provisioning": "exact system binary or SHA-256-verified local fallback",
       "purpose": "discover and download one public caption track without media"
     },
     {
       "id": "deno-ejs-runtime",
       "version": "2.9.5",
-      "provisioning": "dedicated-runner prerequisite",
-      "purpose": "JavaScript challenge runtime used by yt-dlp"
+      "sha256": "8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530",
+      "provisioning": "exact system binary or SHA-256-verified local fallback",
+      "purpose": "JavaScript challenge runtime explicitly wired into yt-dlp"
     }
   ],
   "boundaries": [
     "Only direct public YouTube video and Short URLs are accepted.",
-    "Exactly one real caption track is selected; English then Dutch then another language, with manual before automatic within a language.",
+    "With an explicit language, an exact language code is preferred before a broader family match; manual beats automatic for the same exact language. With language=auto, English then Dutch then another language is selected, with manual before automatic within a language.",
     "If no caption track exists, the request succeeds with status skipped_no_captions and no transcript file.",
     "The acquisition job runs only on a dedicated self-hosted Linux x64 runner or through scripts/run_local.sh on a normal direct network connection.",
     "No comments, channel or playlist discovery, search, ranking, topic filtering, engagement data, knowledge handoff, article/feed/sitemap extraction, audio fallback or Whisper exists in this runtime.",
     "No cookies, login, proxy, CAPTCHA bypass, PO token or media download is used.",
+    "Deno is passed explicitly to yt-dlp through --js-runtimes; it is not a dead prerequisite.",
     "Only minimal caption provenance is persisted; raw yt-dlp metadata is not persisted.",
     "Project identity, live source-set versions, project routing and project policy are supplied and owned outside this repository."
   ]

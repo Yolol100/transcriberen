@@ -46,6 +46,10 @@ FORBIDDEN_RUNTIME_TERMS = {
 }
 PROJECT_TRUTH_KEYS = {"owner_skill", "owner_mode", "project_id", "source_set_version"}
 PROJECT_TRUTH_MARKERS = {"project-transcriberen", "2.2.0-captions-only"}
+YT_DLP_VERSION = "2026.08.20.234504"
+YT_DLP_SHA256 = "8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93"
+DENO_VERSION = "2.9.5"
+DENO_SHA256 = "8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530"
 
 
 def run_checks(root: Path = ROOT) -> dict:
@@ -69,9 +73,14 @@ def run_checks(root: Path = ROOT) -> dict:
         leaked_keys = sorted(PROJECT_TRUTH_KEYS.intersection(contract))
         if leaked_keys:
             failures.append("project truth keys in toolkit contract: " + ", ".join(leaked_keys))
-        ids = {tool.get("id") for tool in contract.get("tools", [])}
-        if ids != {"yt-dlp", "deno-ejs-runtime"}:
-            failures.append(f"unexpected tool set: {sorted(ids)}")
+        tools = {tool.get("id"): tool for tool in contract.get("tools", [])}
+        if set(tools) != {"yt-dlp", "deno-ejs-runtime"}:
+            failures.append(f"unexpected tool set: {sorted(tools)}")
+        else:
+            if tools["yt-dlp"].get("version") != YT_DLP_VERSION or tools["yt-dlp"].get("sha256") != YT_DLP_SHA256:
+                failures.append("yt-dlp version/hash pin mismatch")
+            if tools["deno-ejs-runtime"].get("version") != DENO_VERSION or tools["deno-ejs-runtime"].get("sha256") != DENO_SHA256:
+                failures.append("Deno version/hash pin mismatch")
 
     runtime_files = (
         "toolkit-contract.json",
@@ -97,6 +106,23 @@ def run_checks(root: Path = ROOT) -> dict:
             if term in text:
                 failures.append(f"obsolete runtime term {term!r} remains in {relative}")
 
+    runtime = root / "scripts/captions_runtime.py"
+    if runtime.is_file() and '"--no-warnings"' in runtime.read_text(encoding="utf-8"):
+        failures.append("yt-dlp warnings must remain visible for access-block classification")
+
+    installer = root / "scripts/install_tools.sh"
+    if installer.is_file():
+        text = installer.read_text(encoding="utf-8")
+        for needle, message in (
+            (f'YT_DLP_SHA256="{YT_DLP_SHA256}"', "installer yt-dlp hash pin mismatch"),
+            (f'DENO_SHA256="{DENO_SHA256}"', "installer Deno hash pin mismatch"),
+            ('--js-runtimes "deno:$HERE/deno"', "yt-dlp wrapper does not explicitly use Deno"),
+            ('actual="$(sha256sum "$file" | awk', "tool bootstrap does not calculate downloaded SHA-256"),
+            ('if [[ "$actual" != "$expected" ]]', "tool bootstrap does not compare downloaded SHA-256"),
+        ):
+            if needle not in text:
+                failures.append(message)
+
     workflow = root / ".github/workflows/transcribe.yml"
     if workflow.is_file():
         text = workflow.read_text(encoding="utf-8")
@@ -104,6 +130,8 @@ def run_checks(root: Path = ROOT) -> dict:
             failures.append("transcribe workflow is not bound to dedicated self-hosted runner")
         if "branches: [runtime-requests]" not in text:
             failures.append("transcribe workflow must use runtime-requests branch")
+        if "--result pending" not in text:
+            failures.append("queue workflow does not publish pending self-hosted status")
 
     return {"ok": not failures, "failures": failures, "required_count": len(REQUIRED), "forbidden_count": len(FORBIDDEN)}
 

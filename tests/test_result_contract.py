@@ -59,6 +59,31 @@ class ResultContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "project truth"):
             self.run_in_temp(result)
 
+    def test_source_url_must_exactly_match_video_id_and_type(self):
+        result = self.base("skipped_no_captions")
+        result["source"]["url"] = "https://www.youtube.com/watch?v=AAAAAAAAAAA"
+        with self.assertRaisesRegex(ValueError, "exactly match"):
+            self.run_in_temp(result)
+
+    def test_real_runtime_requires_pinned_tool_versions(self):
+        result = self.base("skipped_no_captions")
+        result["runtime_provenance"] = {
+            "execution_target": "self-hosted",
+            "yt_dlp_version": "wrong",
+            "deno_version": "2.9.5",
+        }
+        with self.assertRaisesRegex(ValueError, "yt-dlp version"):
+            self.run_in_temp(result)
+
+    def test_invalid_caption_format_is_rejected(self):
+        text = "hello world\n"
+        result = self.base("ok")
+        result["caption"] = {"language": "en", "kind": "manual", "format": "xml", "cue_count": 1}
+        result["transcript_sha256"] = hashlib.sha256(text.encode()).hexdigest()
+        result["transcript_chars"] = len(text)
+        with self.assertRaisesRegex(ValueError, "vtt or srt"):
+            self.run_in_temp(result, text)
+
     def test_skip_rejects_transcript_file(self):
         with self.assertRaises(ValueError):
             self.run_in_temp(self.base("skipped_no_captions"), "should not exist\n")

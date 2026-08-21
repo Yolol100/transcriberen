@@ -11,10 +11,8 @@ API_VERSION = "2026-03-10"
 
 def normalize_result(result):
     value = str(result or "").strip().lower()
-    if value == "success":
-        return "success"
-    if value == "failure":
-        return "failure"
+    if value in {"success", "failure", "pending", "error"}:
+        return value
     return "error"
 
 

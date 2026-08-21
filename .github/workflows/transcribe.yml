@@ -13,6 +13,9 @@ jobs:
   resolve:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      statuses: write
     outputs:
       run: ${{ steps.resolve.outputs.run }}
       request_id: ${{ steps.resolve.outputs.request_id }}
@@ -84,6 +87,13 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      - name: Publish pending self-hosted runtime status
+        if: steps.resolve.outputs.run == 'true'
+        working-directory: runtime
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish_ci_status.py --context 'runtime/Transcribe Public Source' --result pending
+
   runtime:
     needs: resolve
     if: needs.resolve.outputs.run == 'true' && github.repository == 'Yolol100/transcriberen'
@@ -134,7 +144,7 @@ jobs:
         with:
           name: resolved-transcription-request
 
-      - name: Verify caption tool prerequisites
+      - name: Provision exact caption tools
         run: bash scripts/install_tools.sh
 
       - name: Extract one public caption track
