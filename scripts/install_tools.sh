@@ -15,7 +15,14 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 verify_sha256() {
   local file="$1"
   local expected="$2"
-  printf '%s  %s\n' "$expected" "$file" | sha256sum -c - >/dev/null
+  local label="$3"
+  local actual
+  actual="$(sha256sum "$file" | awk '{print $1}')"
+  if [[ "$actual" != "$expected" ]]; then
+    printf 'SHA-256 mismatch for %s: expected=%s actual=%s\n' "$label" "$expected" "$actual" >&2
+    return 1
+  fi
+  printf 'SHA-256 verified for %s: %s\n' "$label" "$actual"
 }
 
 download() {
@@ -34,7 +41,7 @@ else
   download \
     "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/${YT_DLP_VERSION}/yt-dlp" \
     "$TMP_DIR/yt-dlp"
-  verify_sha256 "$TMP_DIR/yt-dlp" "$YT_DLP_SHA256"
+  verify_sha256 "$TMP_DIR/yt-dlp" "$YT_DLP_SHA256" "yt-dlp ${YT_DLP_VERSION}"
   install -m 0755 "$TMP_DIR/yt-dlp" "$BIN_DIR/yt-dlp.bin"
 fi
 
@@ -45,7 +52,7 @@ else
   download \
     "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip" \
     "$TMP_DIR/deno.zip"
-  verify_sha256 "$TMP_DIR/deno.zip" "$DENO_SHA256"
+  verify_sha256 "$TMP_DIR/deno.zip" "$DENO_SHA256" "Deno ${DENO_VERSION} linux-x86_64 zip"
   python3 - "$TMP_DIR/deno.zip" "$BIN_DIR/deno" <<'PY'
 import pathlib
 import sys
