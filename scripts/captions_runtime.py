@@ -284,7 +284,10 @@ def deno_version() -> str:
     if completed.returncode != 0:
         return "unknown"
     first = completed.stdout.splitlines()[0].strip() if completed.stdout else ""
-    return first.removeprefix("deno ").strip() or "unknown"
+    parts = first.split()
+    if len(parts) >= 2 and parts[0].casefold() == "deno":
+        return parts[1]
+    return "unknown"
 
 
 def runtime_provenance() -> dict:
