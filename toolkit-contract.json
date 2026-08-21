@@ -11,61 +11,126 @@
   "requires_mcp": false,
   "tools": [
     {
+      "id": "innertube-public-adapter",
+      "version": "repo",
+      "trigger_when": "public YouTube video metadata/captions or bounded top-level comments are requested before yt-dlp fallback",
+      "outputs": [
+        "public video metadata",
+        "selected signed captions",
+        "bounded top-level comments",
+        "per-client provider diagnostics"
+      ]
+    },
+    {
       "id": "yt-dlp",
       "version": "2026.08.20.234504",
       "sha256": "8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93",
       "release_channel": "nightly",
       "trigger_when": "public YouTube discovery/captions/comments; public media metadata/subtitles; or authorized non-YouTube extraction",
-      "outputs": ["YouTube discovery candidates", "selected captions", "public comments", "normalized metadata", "temporary authorized non-YouTube audio"]
+      "outputs": [
+        "YouTube discovery candidates",
+        "selected captions",
+        "public comments",
+        "normalized metadata",
+        "temporary authorized non-YouTube audio"
+      ]
     },
     {
       "id": "deno-ejs-runtime",
       "version": "2.9.5",
       "sha256": "8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530",
       "trigger_when": "yt-dlp requires local EJS challenge execution",
-      "outputs": ["local restricted-permission JavaScript challenge execution"]
+      "outputs": [
+        "local restricted-permission JavaScript challenge execution"
+      ]
     },
     {
       "id": "ffmpeg",
       "version": "runner-recorded",
       "trigger_when": "explicitly authorized non-YouTube audio normalization is needed",
-      "outputs": ["temporary 16 kHz mono WAV and media metadata"]
+      "outputs": [
+        "temporary 16 kHz mono WAV and media metadata"
+      ]
     },
     {
       "id": "whisper.cpp",
       "version": "v1.9.2",
       "sha256": "46811a3ecf584307480a220b9ef5ff81b7b22dc41577cbc274ce3afc61f753b1",
       "trigger_when": "authorized non-YouTube audio has no usable subtitles and both audio fallback gates are true",
-      "outputs": ["local transcript"]
+      "outputs": [
+        "local transcript"
+      ]
     },
     {
       "id": "whisper-base-model",
       "version": "hf-5359861c739e955e79d9a303bcbc70fb988958b1",
       "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
       "trigger_when": "authorized whisper.cpp audio fallback is enabled",
-      "outputs": ["local model runtime only"]
+      "outputs": [
+        "local model runtime only"
+      ]
     },
     {
       "id": "trafilatura",
       "version": "2.1.0",
       "trigger_when": "article/html extraction is needed",
-      "outputs": ["normalized article text"]
+      "outputs": [
+        "normalized article text"
+      ]
     },
     {
       "id": "python-source-parser",
       "version": "repo",
       "trigger_when": "RSS/Atom/sitemap parsing, YouTube result normalization/ranking/selection, comment review ranking or provenance validation is needed",
-      "outputs": ["normalized discovered links", "YouTube selection/index", "comment review candidates", "provenance"]
+      "outputs": [
+        "normalized discovered links",
+        "YouTube selection/index",
+        "comment review candidates",
+        "provenance"
+      ]
     }
   ],
   "usage_assertions": [
-    {"tool": "yt-dlp", "path": "scripts/install_tools.sh", "contains": "YT_DLP_SHA256"},
-    {"tool": "deno-ejs-runtime", "path": "scripts/install_tools.sh", "contains": "DENO_SHA256"},
-    {"tool": "ffmpeg", "path": "scripts/runtime.py", "contains": "ffmpeg"},
-    {"tool": "whisper.cpp", "path": "scripts/install_tools.sh", "contains": "WHISPER_SHA256"},
-    {"tool": "whisper-base-model", "path": "scripts/install_tools.sh", "contains": "WHISPER_MODEL_SHA256"},
-    {"tool": "trafilatura", "path": "requirements.lock", "contains": "trafilatura==2.1.0"},
-    {"tool": "python-source-parser", "path": "scripts/youtube_runtime.py", "contains": "rank_comment_candidates"}
+    {
+      "tool": "innertube-public-adapter",
+      "path": "scripts/innertube_runtime.py",
+      "contains": "PLAYER_CLIENT_ORDER"
+    },
+    {
+      "tool": "yt-dlp",
+      "path": "scripts/install_tools.sh",
+      "contains": "YT_DLP_SHA256"
+    },
+    {
+      "tool": "deno-ejs-runtime",
+      "path": "scripts/install_tools.sh",
+      "contains": "DENO_SHA256"
+    },
+    {
+      "tool": "ffmpeg",
+      "path": "scripts/runtime.py",
+      "contains": "ffmpeg"
+    },
+    {
+      "tool": "whisper.cpp",
+      "path": "scripts/install_tools.sh",
+      "contains": "WHISPER_SHA256"
+    },
+    {
+      "tool": "whisper-base-model",
+      "path": "scripts/install_tools.sh",
+      "contains": "WHISPER_MODEL_SHA256"
+    },
+    {
+      "tool": "trafilatura",
+      "path": "requirements.lock",
+      "contains": "trafilatura==2.1.0"
+    },
+    {
+      "tool": "python-source-parser",
+      "path": "scripts/youtube_runtime.py",
+      "contains": "rank_comment_candidates"
+    }
   ],
   "boundaries": [
     "Only public HTTP(S) sources and accountless public YouTube discovery; no login, cookie, credential, DRM, paywall, CAPTCHA or age-control bypass.",
@@ -73,6 +138,9 @@
     "An upstream public-YouTube anti-bot/access denial is reported as access_blocked evidence; the runtime does not answer it by enabling cookies, login, proxying or media fallback.",
     "Public YouTube is captions, metadata and optional public comments only; audio/video download and Whisper fallback are blocked.",
     "Public GitHub runs may persist bounded task-scoped transcript/comment analysis artifacts when analysis_content_allowed=true; this does not authorize republication or reuse.",
+    "The repo-native public InnerTube adapter tries direct Android then iOS player clients and WEB next for bounded top-level comments; it uses no cookies, login, environment proxy, browser/TLS fingerprint impersonation, PO token or media endpoint.",
+    "The WEB next route uses only public YouTube client configuration and never requires a user-supplied API key or secret; requires_api_key=false therefore remains true.",
+    "InnerTube metadata is accepted for filtered/ranked requests only when the fields required by that request are present; otherwise the reviewed yt-dlp cascade is used to avoid silently weakening selection semantics.",
     "The yt-dlp extractor uses an explicitly reviewed nightly release pin and verified SHA-256 so fast-moving YouTube compatibility fixes do not require an unpinned runtime auto-update.",
     "Automatic YouTube caption choice is English, then Dutch, then the first other available language; manual captions beat automatic captions within the same language.",
     "Auto-translated YouTube caption variants are rejected using yt-dlp translated_subs skipping plus a local tlang URL guard for known metadata edge cases.",
