@@ -1,0 +1,39 @@
+{
+  "enabled": true,
+  "request_id": "seo-ahrefs-2026-public-analysis-readback-20260821-0133",
+  "owner": "webactueel-workflow",
+  "project_id": "project-transcriberen",
+  "url": "https://www.youtube.com/watch?v=tiW6xRYSXmM",
+  "mode": "youtube",
+  "language": "auto",
+  "allow_audio_fallback": false,
+  "audio_access_authorized": false,
+  "analysis_content_allowed": true,
+  "reuse_allowed": false,
+  "rights_basis": "analysis-paraphrase-only",
+  "youtube_access_basis": "public-anonymous",
+  "public_request_acknowledged": false,
+  "youtube": {
+    "scope": "video",
+    "sort_by": "relevance",
+    "max_items": 1,
+    "candidate_limit": 1,
+    "scan_limit": 1,
+    "allow_unbounded": false,
+    "include_comments": true,
+    "comment_sort": "top",
+    "max_comments": "20",
+    "include_replies": false,
+    "comment_selection": "knowledge",
+    "comment_review_limit": 10
+  },
+  "knowledge_context": {
+    "goal": "Evaluate current 2026 SEO and AI-search practices for possible improvements to Webactueel SEO knowledge.",
+    "target_owner": "seo",
+    "keywords": ["SEO 2026", "AI search", "Google", "LLM", "content", "ranking"]
+  },
+  "source_context": {
+    "project_id": "project-transcriberen",
+    "source_set_version": "2.1.0-public-analysis"
+  }
+}
