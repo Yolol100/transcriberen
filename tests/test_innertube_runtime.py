@@ -145,7 +145,11 @@ class Tests(unittest.TestCase):
         proxy_handlers = [h for h in m._OPENER.handlers if isinstance(h, m.urllib.request.ProxyHandler)]
         self.assertEqual(proxy_handlers, [])
 
-    def test_web_next_uses_public_client_key_without_user_secret(self):
+    def test_web_next_uses_reviewed_public_client_config(self):
+        self.assertEqual(
+            m._WEB_API_KEY_B64,
+            "QUl6YVN5QU9fRkoyU2xxVThRNFNURUhMR0NpbHdfWTlfMTFxY1c4",
+        )
         url = m._endpoint_for_client(m.NEXT_ENDPOINT, "WEB")
         self.assertIn("key=", url)
         self.assertNotIn("key=", m._endpoint_for_client(m.PLAYER_ENDPOINT, "ANDROID"))
