@@ -3,49 +3,35 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REQUEST_INPUT="${1:-}"
-
 if [[ -z "$REQUEST_INPUT" ]]; then
   echo "usage: bash scripts/run_local.sh <request.json>" >&2
   exit 2
 fi
-
 if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 is required (Python 3.12 recommended)" >&2
+  echo "python3 is required" >&2
   exit 2
 fi
 
 REQUEST_PATH="$(python3 - "$REQUEST_INPUT" <<'PY'
 from pathlib import Path
 import sys
-p = Path(sys.argv[1]).expanduser().resolve()
-if not p.is_file():
-    raise SystemExit(f"request file not found: {p}")
-print(p)
+path = Path(sys.argv[1]).expanduser().resolve()
+if not path.is_file():
+    raise SystemExit(f"request file not found: {path}")
+print(path)
 PY
 )"
 
 cd "$ROOT"
-
-# Keep local YouTube execution on the machine's direct connection. The
-# controlled runtime intentionally does not inherit proxy configuration.
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy || true
 
-VENV="$ROOT/.local-runtime-venv"
-if [[ ! -x "$VENV/bin/python" ]]; then
-  python3 -m venv "$VENV"
-fi
-# shellcheck disable=SC1091
-source "$VENV/bin/activate"
-
-python - <<'PY'
+python3 - <<'PY'
 import sys
 if sys.version_info < (3, 12):
     raise SystemExit(f"Python 3.12+ required; found {sys.version.split()[0]}")
-print(f"python={sys.version.split()[0]}")
 PY
 
-bash scripts/install_python_deps.sh
-bash scripts/install_tools.sh false
+bash scripts/install_tools.sh
 export PATH="$ROOT/tools/bin:$PATH"
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -65,22 +51,11 @@ export GITHUB_RUN_ID="local-$STAMP"
 export GITHUB_RUN_ATTEMPT="1"
 export GITHUB_WORKFLOW_REF="local:scripts/run_local.sh"
 export GITHUB_EVENT_NAME="local"
-export GITHUB_REPOSITORY_VISIBILITY="local"
+export TRANSCRIBE_EXECUTION_TARGET="local"
 
-REQUEST_FILE="$REQUEST_PATH" python scripts/resolve_request_hardened.py
-python - <<'PY'
-import json
-from pathlib import Path
-req = json.loads(Path('resolved-request.json').read_text(encoding='utf-8'))
-if req.get('enabled') is not True:
-    raise SystemExit('request is disabled; nothing to execute')
-PY
-
-REQUEST_FILE="$ROOT/resolved-request.json" python scripts/runtime_topic_filter.py
-if [[ -f results/youtube-index.json ]]; then
-  python scripts/normalize_youtube_result_v2.py results/youtube-index.json
-fi
-python scripts/validate_result.py results/result.json
+REQUEST_FILE="$REQUEST_PATH" python3 scripts/resolve_request.py
+REQUEST_FILE="$ROOT/resolved-request.json" python3 scripts/captions_runtime.py
+python3 scripts/validate_result.py results/result.json
 
 (
   cd results
@@ -93,19 +68,13 @@ python scripts/validate_result.py results/result.json
   sha256sum -c SHA256SUMS.txt
 )
 
-python - <<'PY'
+python3 - <<'PY'
 import json
 from pathlib import Path
-r = json.loads(Path('results/result.json').read_text(encoding='utf-8'))
-yt = ((r.get('metadata') or {}).get('youtube') or {})
-print('')
-print('local runtime complete')
-print(f"request_id={r.get('request_id')}")
-print(f"mode={r.get('detected_mode')}")
-if r.get('detected_mode') == 'youtube':
-    print(f"collection_status={yt.get('collection_status')}")
-    print(f"selected_count={yt.get('selected_count')}")
-    print(f"transcript_count={yt.get('transcript_count')}")
-    print(f"comment_review_candidate_count={yt.get('comment_review_candidate_count')}")
-print(f"results={Path('results').resolve()}")
+result = json.loads(Path('results/result.json').read_text(encoding='utf-8'))
+print(f"status={result['status']}")
+if result['status'] == 'ok':
+    print(f"transcript={Path('results/transcript.txt').resolve()}")
+elif result['status'] in {'access_blocked', 'error'}:
+    raise SystemExit(result.get('error') or result['status'])
 PY
