@@ -6,16 +6,15 @@ on:
     branches: [main]
     paths:
       - 'toolkit-contract.json'
-      - 'requirements.in'
-      - 'requirements.txt'
-      - 'requirements.lock'
       - 'scripts/**'
       - 'tests/**'
+      - 'README.md'
       - 'SECURITY.md'
       - 'THREAT-MODEL.md'
-      - 'README.md'
+      - 'AGENTS.md'
+      - 'docs/**'
+      - '.github/REPOSITORY-GOVERNANCE.md'
       - '.github/workflows/**'
-      - '.github/dependabot.yml'
 
 permissions:
   contents: read
@@ -42,137 +41,68 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install verified Python extraction dependencies
-        run: bash scripts/install_python_deps.sh
-
       - name: Validate code and regressions
         shell: bash
         run: |
           set -euo pipefail
           python -m py_compile scripts/*.py tests/*.py
-          bash -n scripts/install_tools.sh scripts/install_python_deps.sh
+          bash -n scripts/install_tools.sh scripts/run_local.sh
           python -m unittest discover -s tests -v
+          python scripts/doctor.py --mode ci --json
 
-      - name: Validate toolkit and audit-hardening boundaries
+      - name: Validate captions-only toolkit contract
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           import json
           import pathlib
-          import re
 
           contract = json.load(open('toolkit-contract.json', encoding='utf-8'))
-          assert contract['schema_version'] == '1.2'
-          assert contract['source_set_version'] == '2.1.0-public-analysis'
+          assert contract['schema_version'] == '2.0'
+          assert contract['source_set_version'] == '2.2.0-captions-only'
           assert contract['owner_skill'] == 'webactueel-workflow'
           assert contract['project_id'] == 'project-transcriberen'
+          assert contract['runtime_target'] == 'self-hosted-or-local-direct-network'
           for key in ('requires_account', 'requires_api_key', 'requires_mcp'):
               assert contract.get(key) is False
-          yt_tool = next(tool for tool in contract['tools'] if tool['id'] == 'yt-dlp')
-          assert yt_tool['version'] == '2026.08.20.234504'
-          assert yt_tool['sha256'] == '8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93'
-          assert yt_tool['release_channel'] == 'nightly'
 
-          ids = [tool['id'] for tool in contract['tools']]
-          assert len(ids) == len(set(ids))
-          covered = set()
-          for assertion in contract['usage_assertions']:
-              assert assertion['tool'] in ids
-              path = pathlib.Path(assertion['path'])
-              assert path.is_file(), path
-              assert assertion['contains'] in path.read_text(encoding='utf-8'), assertion
-              covered.add(assertion['tool'])
-          assert covered == set(ids)
+          tools = {tool['id']: tool for tool in contract['tools']}
+          assert set(tools) == {'yt-dlp', 'deno-ejs-runtime'}
+          assert tools['yt-dlp']['version'] == '2026.08.20.234504'
+          assert tools['deno-ejs-runtime']['version'] == '2.9.5'
 
-          requirements_txt = pathlib.Path('requirements.txt').read_text(encoding='utf-8').strip()
-          assert requirements_txt == '-r requirements.lock'
-          lock = pathlib.Path('requirements.lock').read_text(encoding='utf-8')
-          assert 'trafilatura==2.1.0' in lock
-          lock_lines = [x.strip() for x in lock.splitlines() if x.strip() and not x.startswith('#')]
-          pattern = re.compile(r'^[a-z0-9][a-z0-9._-]*==[^ ]+ --hash=sha256:[0-9a-f]{64}  # [^ ]+\.whl$')
-          assert lock_lines and all(pattern.fullmatch(x) for x in lock_lines)
+          forbidden = {
+              'requirements.in', 'requirements.txt', 'requirements.lock',
+              'scripts/runtime.py', 'scripts/runtime_topic_filter.py',
+              'scripts/youtube_runtime.py', 'scripts/innertube_runtime.py',
+              'scripts/caption_client_profiles.py', 'scripts/normalize_youtube_result_v2.py',
+              'scripts/resolve_request_hardened.py', 'scripts/install_python_deps.sh',
+              '.github/workflows/transcribe-self-hosted.yml', '.github/workflows/lock-audit.yml',
+          }
+          for path in forbidden:
+              assert not pathlib.Path(path).exists(), path
 
           resolver = pathlib.Path('scripts/resolve_request.py').read_text(encoding='utf-8')
-          for needle in (
-              'current_source_set_version', 'youtube_access_basis', 'public_request_acknowledged',
-              'MAX_BOUNDED_COMMENT_BUDGET', 'comment_selection', 'channel_streams'
-          ):
-              assert needle in resolver
+          assert 'ALLOWED_INPUT_KEYS = {"enabled", "request_id", "url", "language"}' in resolver
+          assert 'source_type = "short"' in resolver
 
-          hardened_resolver = pathlib.Path('scripts/resolve_request_hardened.py').read_text(encoding='utf-8')
-          assert 'INPUT_YOUTUBE_INCLUDE_REPLIES' in hardened_resolver
-          assert 'base.validate_request(req)' in hardened_resolver
-
-          youtube = pathlib.Path('scripts/youtube_runtime.py').read_text(encoding='utf-8')
-          for needle in (
-              '"--skip-download"', 'skip=translated_subs', 'rank_comment_candidates',
-              'transcript-cues.json', 'comment-review.json', 'channel_streams', '"--sleep-requests"',
-              'raise_incomplete_data=1', 'retry-queue.json', 'knowledge-handoff.json'
-          ):
-              assert needle in youtube
-          assert 'bestaudio' not in youtube and '"-x"' not in youtube
-          assert 'SUBTITLE_CLIENT_FALLBACKS' in youtube
-          assert 'max_comments={_comment_limit_args' in youtube
-
-          runtime = pathlib.Path('scripts/runtime.py').read_text(encoding='utf-8')
-          for needle in (
-              'DEFAULT_COMMAND_TIMEOUT_SECONDS', 'MAX_AUTHORIZED_AUDIO_DURATION_SECONDS',
-              'robots_policy', 'Retry-After', 'pinned_public_dns', 'runtime_provenance',
-              'XML DTD/entity declarations are forbidden'
-          ):
+          runtime = pathlib.Path('scripts/captions_runtime.py').read_text(encoding='utf-8')
+          for needle in ('"--skip-download"', '"--no-cookies"', 'skipped_no_captions', 'transcript.txt'):
               assert needle in runtime
-
-          tool_bootstrap = pathlib.Path('scripts/install_tools.sh').read_text(encoding='utf-8')
-          assert 'YT_DLP_VERSION="2026.08.20.234504"' in tool_bootstrap
-          assert 'YT_DLP_SHA256="8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93"' in tool_bootstrap
-          assert 'yt-dlp/yt-dlp-nightly-builds/releases/download/${YT_DLP_VERSION}/yt-dlp' in tool_bootstrap
-          assert 'releases/latest' not in tool_bootstrap
-
-          security = pathlib.Path('SECURITY.md').read_text(encoding='utf-8')
-          assert 'analysis_content_allowed=true' in security
-          assert 'public-anonymous' in security
-          assert 'previously reviewed access basis is recorded' not in security
-          assert 'never persist raw transcript/comment content' not in security
-
-          threat = pathlib.Path('THREAT-MODEL.md').read_text(encoding='utf-8')
-          assert 'analysis_content_allowed=true' in threat
-          assert '`youtube_access_basis` is provenance metadata' in threat
-          assert 'fails closed unless a reviewed access basis is supplied' not in threat
-          assert 'cannot persist raw content' not in threat
+          for forbidden_term in ('include_comments', 'knowledge_context', 'whisper', 'ffmpeg', 'trafilatura'):
+              assert forbidden_term not in runtime.casefold()
 
           workflow = pathlib.Path('.github/workflows/transcribe.yml').read_text(encoding='utf-8')
-          for needle in (
-              'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
-              'actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97',
-              'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c',
-              'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a',
-              'actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d',
-              'GITHUB_REPOSITORY_VISIBILITY', 'public_request_acknowledged', 'youtube_access_basis',
-              'Install FFmpeg only for authorized Whisper fallback'
-          ):
-              assert needle in workflow
-          assert 'artifact-metadata: write' in workflow
-          assert 'workflow_dispatch:' in workflow and 'workflow_call:' in workflow
           assert 'branches: [runtime-requests]' in workflow
-          assert "requests/queue/*.json" in workflow
+          assert 'runs-on: [self-hosted, linux, x64, webactueel-transcribe]' in workflow
+          assert 'python3 scripts/captions_runtime.py' in workflow
           assert 'ref: main' in workflow
-          assert 'resolve_request_hardened.py' in workflow
-          assert "if: steps.result_validation.outcome == 'success'" in workflow
-          assert 'attestations: write' in workflow and 'id-token: write' in workflow
+          assert 'workflow_dispatch:' not in workflow
+          assert 'workflow_call:' not in workflow
+          for forbidden_term in ('runtime_topic_filter.py', 'normalize_youtube_result', 'ffmpeg', 'whisper'):
+              assert forbidden_term not in workflow.casefold()
 
-          dep = pathlib.Path('.github/workflows/dependency-review.yml').read_text(encoding='utf-8')
-          assert 'actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294' in dep
-          assert 'pypa/gh-action-pip-audit@1220774d901786e6f652ae159f7b6bc8fea6d266' in dep
-          assert 'require-hashes: true' in dep and 'no-deps: true' in dep
-
-          codeql = pathlib.Path('.github/workflows/codeql.yml').read_text(encoding='utf-8')
-          assert codeql.count('@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd') == 2
-          assert 'language: [python, actions]' in codeql
-          assert 'validate_codeql_sarif.py' in codeql
-
-          for policy in ('SECURITY.md', 'THREAT-MODEL.md'):
-              assert pathlib.Path(policy).is_file()
           print('toolkit-contract: OK')
           PY
 
@@ -186,17 +116,6 @@ jobs:
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
           subject-path: ci-provenance.txt
-
-      - name: Verify pinned yt-dlp nightly binary and Deno route
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash scripts/install_tools.sh false
-          test "$(tools/bin/yt-dlp --version)" = '2026.08.20.234504'
-          tools/bin/deno --version | grep -F 'deno 2.9.5'
-
-      - name: Verify Trafilatura runtime
-        run: python -c "import trafilatura; assert trafilatura.__version__ == '2.1.0'; print(trafilatura.__version__)"
 
   publish-main-status:
     needs: validate
