@@ -1,37 +1,31 @@
 # Repository governance
 
-This repository is a generic controlled runtime. The default branch must stay reusable and must not store real request state.
+Deze repository is een minimale controlled runtime voor publieke YouTube-captions. `main` bevat alleen generieke runtimecode en geen echte requeststate.
 
-## Required main-branch controls
+## Main
 
-Configure GitHub Rulesets or branch protection for `main` with all of these controls:
+Configureer Rulesets/branch protection voor `main` met minimaal:
 
-- require a pull request before merging;
-- require the current Toolkit Contract, CodeQL (Python and Actions), Dependency Audit/Dependency Review, and Dependency Lock Audit checks;
-- require branches to be up to date before merging;
-- block force pushes and branch deletion;
-- do not allow bypass for normal contributors;
-- prefer signed commits when the repository administration model supports them.
+- pull request vereist vóór merge;
+- actuele Toolkit Contract, CodeQL, Dependency Audit en Repository Doctor checks vereist;
+- branch up-to-date vóór merge;
+- force pushes en branch deletion geblokkeerd;
+- geen normale contributor-bypass.
 
-## Required runtime-requests controls
+## runtime-requests
 
-`runtime-requests` is an operational append-only transport branch, not a development branch. Configure a GitHub Ruleset or branch protection so normal contributors cannot rewrite or delete history, force-push, or bypass the queue contract. Automated request creation may append exactly one `requests/queue/<request_id>.json` file per transport commit; the workflow independently validates that invariant before using the request.
+`runtime-requests` is de enige operationele append-only transportbranch. Een geautomatiseerde requestcommit mag precies één nieuw `requests/queue/<request_id>.json` toevoegen en niets anders.
 
-## Required runtime-requests-selfhosted controls
+Bescherm deze branch tegen history rewrites, force-pushes en deletion. De workflow valideert het append-only contract nogmaals voordat het request wordt gebruikt.
 
-`runtime-requests-selfhosted` is a second operational append-only transport branch for the dedicated self-hosted lane. Apply the same history, force-push, deletion and append-only protections as `runtime-requests`.
+## Self-hosted boundary
 
-The self-hosted workflow must remain narrower than the normal hosted workflow:
+De GitHub-hosted job mag alleen transport/input valideren. YouTube-acquisitie draait uitsluitend op:
 
-- trigger only from pushes to `runtime-requests-selfhosted` under `requests/queue/*.json`;
-- never add `pull_request`, `pull_request_target` or generic reusable-workflow triggers to the self-hosted lane;
-- resolve and validate the transport request on a GitHub-hosted runner before the self-hosted job is eligible;
-- route the runtime job only to `[self-hosted, linux, x64, webactueel-transcribe]`;
-- never execute code from the transport branch on the self-hosted machine; the runtime checkout must stay pinned to `main` with persisted credentials disabled;
-- keep the self-hosted machine dedicated and free of unrelated secrets, credentials and personal browser/session state.
+`[self-hosted, linux, x64, webactueel-transcribe]`
 
-Because the repository is public, repository source controls cannot make a persistent self-hosted runner equivalent to an isolated GitHub-hosted VM. Host isolation, runner enrollment/removal and branch/ruleset enforcement remain repository-administration responsibilities.
+De self-hosted job voert nooit code vanaf `runtime-requests` uit en checkt uitsluitend `Yolol100/transcriberen@main` uit met persisted credentials uitgeschakeld.
 
-The runtime supports `workflow_dispatch` for manual/debug runs, immutable request-queue pushes on `runtime-requests` for normal Chat/connector routing, immutable request-queue pushes on `runtime-requests-selfhosted` for the dedicated direct-network lane, and `workflow_call` for registered repo-to-repo callers. Do not commit live request data to `requests/transcribe.json`; that file is only a disabled generic example/local input.
+De host blijft dedicated en bevat geen persoonlijke browserprofielen, SSH/cloudcredentials of andere projectsecrets.
 
-Branch protection and Rulesets are external repository-administration controls. Repository code and tests can document and detect their absence, but cannot enforce them without GitHub administration permissions.
+Branch protection, Rulesets en runnerregistratie zijn externe repository-admincontroles en kunnen niet volledig door repositorycode worden afgedwongen.
