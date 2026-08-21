@@ -15,18 +15,35 @@ class FakeRuntime:
     class InnerTubeError(RuntimeError):
         pass
 
+    class InnerTubeUnsupported(InnerTubeError):
+        pass
+
     WEB_API_KEY = "public-key"
     PLAYER_ENDPOINT = "https://original.invalid/player"
     CLIENTS = {"ANDROID": {"clientName": "ANDROID", "clientVersion": "1", "userAgent": "ua"}}
     PLAYER_CLIENT_ORDER = ("ANDROID",)
+    YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com"}
 
-    def __init__(self):
+    def __init__(self, track_list=b"<transcript_list />", player_success=True):
         self.calls = []
+        self.track_list = track_list
+        self.player_success = player_success
+        self.records = []
+
+    def video_id_from_url(self, url):
+        return "abc123xyz00"
+
+    def _request_bytes(self, url, client_name="WEB"):
+        self.calls.append(("http", url, client_name))
+        return self.track_list, 200
+
+    def _record(self, *args):
+        self.records.append(args)
 
     def metadata_for(self, url, include_engagement=False):
-        self.calls.append((self.PLAYER_ENDPOINT, url, include_engagement))
-        if "youtubei.googleapis.com" in self.PLAYER_ENDPOINT:
-            raise RuntimeError("first host blocked")
+        self.calls.append(("player", self.PLAYER_ENDPOINT, url, include_engagement))
+        if not self.player_success or "youtubei.googleapis.com" in self.PLAYER_ENDPOINT:
+            raise RuntimeError("player blocked")
         return {"id": "abc123xyz00", "subtitles": {"en": [{"url": "https://www.youtube.com/api/timedtext"}]}}
 
 
@@ -52,10 +69,30 @@ class CaptionClientProfilesTests(unittest.TestCase):
         runtime = FakeRuntime()
         result = m.metadata_for(runtime, "https://youtu.be/abc123xyz00")
         self.assertEqual(result["id"], "abc123xyz00")
-        self.assertEqual(len(runtime.calls), 2)
-        self.assertIn("youtubei.googleapis.com", runtime.calls[0][0])
-        self.assertIn("www.youtube.com", runtime.calls[1][0])
+        player_calls = [call for call in runtime.calls if call[0] == "player"]
+        self.assertEqual(len(player_calls), 2)
+        self.assertIn("youtubei.googleapis.com", player_calls[0][1])
+        self.assertIn("www.youtube.com", player_calls[1][1])
         self.assertEqual(runtime.PLAYER_ENDPOINT, "https://original.invalid/player")
+
+    def test_timedtext_track_list_builds_compatible_caption_metadata(self):
+        xml = (
+            b'<transcript_list><track id="0" name="Automatic" lang_code="en" '
+            b'lang_original="English" kind="asr" /></transcript_list>'
+        )
+        runtime = FakeRuntime(track_list=xml, player_success=False)
+        result = m.metadata_for(runtime, "https://youtu.be/abc123xyz00")
+        self.assertTrue(result["_timedtext_direct"])
+        self.assertIn("en", result["automatic_captions"])
+        entry = result["automatic_captions"]["en"][0]
+        self.assertIn("video.google.com/timedtext", entry["url"])
+        self.assertIn("type=track", entry["url"])
+        self.assertEqual(entry["_innertube_client"], "WEB")
+
+    def test_timedtext_xml_rejects_dtd(self):
+        runtime = FakeRuntime()
+        with self.assertRaises(runtime.InnerTubeError):
+            m._parse_track_list(runtime, b'<!DOCTYPE x><transcript_list />')
 
     def test_example_request_is_caption_only(self):
         sample = ROOT / "requests" / "transcribe.json"
@@ -66,11 +103,12 @@ class CaptionClientProfilesTests(unittest.TestCase):
         self.assertEqual(yt["max_items"], 1)
         self.assertNotIn("knowledge_context", data)
 
-    def test_apply_adds_profiles_without_removing_existing_android(self):
+    def test_apply_adds_profiles_and_timedtext_host(self):
         runtime = FakeRuntime()
         m.apply(runtime)
         self.assertIn("ANDROID", runtime.CLIENTS)
         self.assertIn("ANDROID_VR", runtime.CLIENTS)
+        self.assertIn("video.google.com", runtime.YOUTUBE_HOSTS)
         self.assertEqual(runtime.PLAYER_CLIENT_ORDER[0], "ANDROID_VR")
 
 
