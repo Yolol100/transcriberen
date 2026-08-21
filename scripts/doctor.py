@@ -117,7 +117,8 @@ def run_checks(root: Path = ROOT) -> dict:
             (f'YT_DLP_SHA256="{YT_DLP_SHA256}"', "installer yt-dlp hash pin mismatch"),
             (f'DENO_SHA256="{DENO_SHA256}"', "installer Deno hash pin mismatch"),
             ('--js-runtimes "deno:$HERE/deno"', "yt-dlp wrapper does not explicitly use Deno"),
-            ("sha256sum -c -", "tool bootstrap does not verify downloaded hashes"),
+            ('actual="$(sha256sum "$file" | awk', "tool bootstrap does not calculate downloaded SHA-256"),
+            ('if [[ "$actual" != "$expected" ]]', "tool bootstrap does not compare downloaded SHA-256"),
         ):
             if needle not in text:
                 failures.append(message)
