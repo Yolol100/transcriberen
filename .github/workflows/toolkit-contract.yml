@@ -113,7 +113,8 @@ jobs:
               'YT_DLP_SHA256="8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93"',
               'DENO_SHA256="8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530"',
               '--js-runtimes "deno:$HERE/deno"',
-              'sha256sum -c -',
+              'actual="$(sha256sum "$file" | awk',
+              'if [[ "$actual" != "$expected" ]]',
           ):
               assert needle in installer
 
