@@ -52,15 +52,13 @@ class CaptionsRuntimeTests(unittest.TestCase):
             segments = m.subtitle_segments(path)
         self.assertEqual([item["text"] for item in segments], ["hello world", "again"])
 
-    def test_no_captions_is_clean_skip(self):
+    def test_no_captions_is_clean_skip_without_project_truth(self):
         request = {
             "request_id": "request-001",
             "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
             "video_id": "dQw4w9WgXcQ",
             "source_type": "video",
             "language": "auto",
-            "project_id": "project-transcriberen",
-            "source_set_version": "2.2.0-captions-only",
         }
         with tempfile.TemporaryDirectory() as td:
             request_file = pathlib.Path(td) / "resolved.json"
@@ -74,6 +72,7 @@ class CaptionsRuntimeTests(unittest.TestCase):
                     m.main()
                 result = json.loads((m.RESULTS / "result.json").read_text(encoding="utf-8"))
                 self.assertEqual(result["status"], "skipped_no_captions")
+                self.assertNotIn("source_context", result)
                 self.assertFalse((m.RESULTS / "transcript.txt").exists())
             finally:
                 m.RESULTS = old_results
