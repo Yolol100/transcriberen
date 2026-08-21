@@ -1,6 +1,6 @@
 {
   "enabled": false,
-  "request_id": "example-request-disabled",
+  "request_id": "example-captions-only-disabled",
   "owner": "webactueel-workflow",
   "project_id": "project-transcriberen",
   "url": "https://www.youtube.com/watch?v=VIDEO_ID",
@@ -17,20 +17,14 @@
     "scope": "video",
     "sort_by": "relevance",
     "max_items": 1,
-    "candidate_limit": 100,
-    "scan_limit": 500,
+    "candidate_limit": 1,
+    "scan_limit": 1,
     "allow_unbounded": false,
-    "include_comments": true,
-    "comment_sort": "top",
-    "max_comments": "40",
+    "include_comments": false,
+    "max_comments": "0",
     "include_replies": false,
-    "comment_selection": "knowledge",
-    "comment_review_limit": 10
-  },
-  "knowledge_context": {
-    "goal": "Collect useful source insights for semantic review before any project or Skill promotion.",
-    "target_owner": "webactueel-workflow",
-    "keywords": []
+    "comment_selection": "platform",
+    "comment_review_limit": 0
   },
   "source_context": {
     "project_id": "project-transcriberen",
