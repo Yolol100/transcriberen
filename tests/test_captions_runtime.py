@@ -66,6 +66,16 @@ class CaptionsRuntimeTests(unittest.TestCase):
     def test_warnings_are_not_suppressed(self):
         self.assertNotIn("--no-warnings", m.yt_base())
 
+    def test_deno_version_parses_release_suffix(self):
+        completed = subprocess.CompletedProcess(
+            ["deno", "--version"],
+            0,
+            stdout="deno 2.9.5 (stable, release, x86_64-unknown-linux-gnu)\nv8 14.7.0\ntypescript 5.9.2\n",
+            stderr="",
+        )
+        with mock.patch.object(m, "run", return_value=completed):
+            self.assertEqual(m.deno_version(), "2.9.5")
+
     def test_vtt_parser_removes_rolling_overlap(self):
         with tempfile.TemporaryDirectory() as td:
             path = pathlib.Path(td) / "sample.vtt"
