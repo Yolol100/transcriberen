@@ -1,0 +1,33 @@
+{
+  "enabled": true,
+  "request_id": "ahrefs-timedtext-caption-20260821-1850",
+  "owner": "webactueel-workflow",
+  "project_id": "project-transcriberen",
+  "url": "https://www.youtube.com/watch?v=tiW6xRYSXmM",
+  "mode": "youtube",
+  "language": "auto",
+  "allow_audio_fallback": false,
+  "audio_access_authorized": false,
+  "analysis_content_allowed": true,
+  "reuse_allowed": false,
+  "rights_basis": "analysis-paraphrase-only",
+  "youtube_access_basis": "public-anonymous",
+  "public_request_acknowledged": false,
+  "youtube": {
+    "scope": "video",
+    "sort_by": "relevance",
+    "max_items": 1,
+    "candidate_limit": 1,
+    "scan_limit": 1,
+    "allow_unbounded": false,
+    "include_comments": false,
+    "max_comments": "0",
+    "include_replies": false,
+    "comment_selection": "platform",
+    "comment_review_limit": 0
+  },
+  "source_context": {
+    "project_id": "project-transcriberen",
+    "source_set_version": "2.1.0-public-analysis"
+  }
+}
