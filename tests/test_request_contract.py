@@ -11,7 +11,7 @@ spec.loader.exec_module(resolve_request)
 
 PUBLIC_DNS = [(2, 1, 6, "", ("93.184.216.34", 443))]
 PRIVATE_DNS = [(2, 1, 6, "", ("127.0.0.1", 443))]
-SOURCE_SET = "2.0.0-audit-hardening"
+SOURCE_SET = "2.1.0-public-analysis"
 
 BASE = {
     "enabled": True,
