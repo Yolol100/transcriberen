@@ -147,7 +147,16 @@ jobs:
       - name: Provision exact caption tools
         run: bash scripts/install_tools.sh
 
+      - name: Check persistent caption cache
+        id: cache
+        env:
+          REQUEST_FILE: resolved-request.json
+          GITHUB_SHA: ${{ steps.runtime_sha.outputs.sha }}
+          TRANSCRIBE_EXECUTION_TARGET: self-hosted
+        run: python3 scripts/cache_runtime.py precheck
+
       - name: Extract one public caption track
+        if: steps.cache.outputs.hit != 'true'
         env:
           REQUEST_FILE: resolved-request.json
           GITHUB_SHA: ${{ steps.runtime_sha.outputs.sha }}
@@ -157,6 +166,13 @@ jobs:
           set -euo pipefail
           unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy || true
           python3 scripts/captions_runtime.py
+
+      - name: Update persistent history and export processed index
+        env:
+          REQUEST_FILE: resolved-request.json
+          GITHUB_SHA: ${{ steps.runtime_sha.outputs.sha }}
+          TRANSCRIBE_EXECUTION_TARGET: self-hosted
+        run: python3 scripts/cache_runtime.py finalize
 
       - name: Validate minimal result contract
         id: result_validation
@@ -199,6 +215,7 @@ jobs:
           result = json.load(open('results/result.json', encoding='utf-8'))
           status = result['status']
           print(f'status={status}')
+          print(f"cache_hit={bool(result.get('cache_hit'))}")
           if status in {'access_blocked', 'error'}:
               raise SystemExit(result.get('error') or status)
           PY
