@@ -1,5 +1,9 @@
 # Webactueel Transcriberen Runtime
 
+> **Portfoliostatus:** Actief ondersteunend · Webactueel transcriptieruntime
+
+**Rol in het platform:** deze runtime levert één begrensde transcriptietaak aan de Webactueel-workflow. Requests gebruiken de eigen append-only `runtime-requests`-queue; [Orchestrator](https://github.com/Yolol100/Orchestrator) maakt hiervoor geen nieuwe runtimebranch en inhoudelijke acceptatie blijft bij de owning workflow.
+
 Deze repository heeft één taak:
 
 **publieke YouTube-video of Short -> één echte ondertiteltrack -> platte transcripttekst.**
