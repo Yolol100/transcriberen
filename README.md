@@ -95,3 +95,7 @@ bash scripts/run_local.sh requests/transcribe.json
 De lokale route gebruikt dezelfde resolver, toolbootstrap, captionruntime en resultaatvalidator als de self-hosted GitHub Actions-route.
 
 Zie `docs/SELF-HOSTED-RUNNER.md` voor de dedicated runner.
+
+## Licentie
+
+Deze repository bevat momenteel geen open-sourcelicentie. Hergebruik, distributie of afgeleide werken zijn niet toegestaan zonder expliciete toestemming van de rechthebbende.
