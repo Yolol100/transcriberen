@@ -10,6 +10,7 @@ REQUIRED = {
     "toolkit-contract.json",
     "scripts/resolve_request.py",
     "scripts/captions_runtime.py",
+    "scripts/cache_runtime.py",
     "scripts/validate_result.py",
     "scripts/install_tools.sh",
     "scripts/run_local.sh",
@@ -86,6 +87,7 @@ def run_checks(root: Path = ROOT) -> dict:
         "toolkit-contract.json",
         "scripts/resolve_request.py",
         "scripts/captions_runtime.py",
+        "scripts/cache_runtime.py",
         "scripts/validate_result.py",
     )
     for relative in runtime_files:
@@ -97,7 +99,7 @@ def run_checks(root: Path = ROOT) -> dict:
             if marker in text:
                 failures.append(f"project truth marker {marker!r} remains in {relative}")
 
-    for relative in ("scripts/resolve_request.py", "scripts/captions_runtime.py", ".github/workflows/transcribe.yml"):
+    for relative in ("scripts/resolve_request.py", "scripts/captions_runtime.py", "scripts/cache_runtime.py", ".github/workflows/transcribe.yml"):
         path = root / relative
         if not path.is_file():
             continue
@@ -109,6 +111,18 @@ def run_checks(root: Path = ROOT) -> dict:
     runtime = root / "scripts/captions_runtime.py"
     if runtime.is_file() and '"--no-warnings"' in runtime.read_text(encoding="utf-8"):
         failures.append("yt-dlp warnings must remain visible for access-block classification")
+
+    cache = root / "scripts/cache_runtime.py"
+    if cache.is_file():
+        text = cache.read_text(encoding="utf-8")
+        for needle, message in (
+            ("history.sqlite3", "persistent cache database is not configured"),
+            ("processed-index.json", "processed index export is missing"),
+            ("PRIMARY KEY (video_id, requested_language)", "cache does not deduplicate by video/language"),
+            ("cache_hit", "cache hit evidence is missing"),
+        ):
+            if needle not in text:
+                failures.append(message)
 
     installer = root / "scripts/install_tools.sh"
     if installer.is_file():
@@ -132,6 +146,10 @@ def run_checks(root: Path = ROOT) -> dict:
             failures.append("transcribe workflow must use runtime-requests branch")
         if "--result pending" not in text:
             failures.append("queue workflow does not publish pending self-hosted status")
+        if "python3 scripts/cache_runtime.py precheck" not in text:
+            failures.append("workflow does not precheck persistent cache")
+        if "python3 scripts/cache_runtime.py finalize" not in text:
+            failures.append("workflow does not persist/export cache history")
 
     return {"ok": not failures, "failures": failures, "required_count": len(REQUIRED), "forbidden_count": len(FORBIDDEN)}
 
