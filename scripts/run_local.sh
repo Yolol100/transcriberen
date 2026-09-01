@@ -54,7 +54,12 @@ export GITHUB_EVENT_NAME="local"
 export TRANSCRIBE_EXECUTION_TARGET="local"
 
 REQUEST_FILE="$REQUEST_PATH" python3 scripts/resolve_request.py
-REQUEST_FILE="$ROOT/resolved-request.json" python3 scripts/captions_runtime.py
+export REQUEST_FILE="$ROOT/resolved-request.json"
+python3 scripts/cache_runtime.py precheck
+if [[ ! -f results/result.json ]]; then
+  python3 scripts/captions_runtime.py
+fi
+python3 scripts/cache_runtime.py finalize
 python3 scripts/validate_result.py results/result.json
 
 (
@@ -72,7 +77,11 @@ python3 - <<'PY'
 import json
 from pathlib import Path
 result = json.loads(Path('results/result.json').read_text(encoding='utf-8'))
+index = json.loads(Path('results/processed-index.json').read_text(encoding='utf-8'))
 print(f"status={result['status']}")
+print(f"cache_hit={bool(result.get('cache_hit'))}")
+print(f"captions_done={index['captions_done']}")
+print(f"processed_entries={index['processed_entries']}")
 if result['status'] == 'ok':
     print(f"transcript={Path('results/transcript.txt').resolve()}")
 elif result['status'] in {'access_blocked', 'error'}:
