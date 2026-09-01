@@ -58,17 +58,46 @@ Operationele requests worden append-only toegevoegd op branch `runtime-requests`
 
 De bestandsnaam moet exact gelijk zijn aan `request_id`. De queuecommit mag precies één nieuw requestbestand toevoegen en niets anders. De self-hosted runner voert nooit code vanaf de transportbranch uit; hij checkt uitsluitend `Yolol100/transcriberen@main` uit.
 
+## Snelle herkenning en cache
+
+Succesvolle transcripties worden op de trusted execution host persistent bijgehouden in een lokale SQLite-index. De sleutel is `video_id + requested_language`.
+
+Bij iedere nieuwe request gebeurt eerst een cachecontrole:
+
+- bestaat dezelfde video + taal al met een gevalideerd succesvol transcript, dan wordt dat transcript direct hergebruikt en wordt YouTube niet opnieuw bevraagd;
+- klopt de opgeslagen transcript-SHA of lengte niet meer, dan wordt de corrupte cache-entry verwijderd en vindt een normale nieuwe acquisitie plaats;
+- de persistente database blijft hoststate en wordt nooit naar `main` gecommit.
+
+Standaard staat de database in:
+
+`~/.local/share/webactueel-transcribe/history.sqlite3`
+
+Via `TRANSCRIBE_STATE_DIR` kan een andere state-directory worden gekozen.
+
+Iedere run exporteert daarnaast `results/processed-index.json`. Die bevat onder meer:
+
+- `unique_videos` — aantal unieke video-ID's;
+- `processed_entries` — aantal unieke video/taal-combinaties;
+- `captions_done` — aantal entries met een succesvol transcript;
+- `status_counts` — aantallen per runtime-status;
+- `items` — alle bekende video-ID's met status, taal, captionmetadata, hashes en verwerkingstijdstippen.
+
+Transcripttekst zelf staat niet in `processed-index.json`.
+
 ## Output
 
 Iedere run maakt:
 
 - `results/result.json`
+- `results/processed-index.json`
 - `results/SHA256SUMS.txt`
 - `results/transcript.txt` alleen bij status `ok`
 
+`result.json` bevat bij de cache-route ook `cache_hit: true`; bij een verse acquisitie wordt `cache_hit: false` vastgelegd.
+
 Mogelijke statussen:
 
-- `ok` — ondertiteling opgehaald en genormaliseerd;
+- `ok` — ondertiteling opgehaald of uit de gevalideerde lokale cache hergebruikt en genormaliseerd;
 - `skipped_no_captions` — bron heeft aantoonbaar geen bruikbare captiontrack; bewust overgeslagen;
 - `access_blocked` — YouTube blokkeert de acquisitieverbinding;
 - `error` — andere extractie- of validatiefout.
@@ -92,7 +121,7 @@ Vereisten: Linux x86_64 of WSL2/Ubuntu, Python 3.12+, `curl` en GNU `sha256sum`.
 bash scripts/run_local.sh requests/transcribe.json
 ```
 
-De lokale route gebruikt dezelfde resolver, toolbootstrap, captionruntime en resultaatvalidator als de self-hosted GitHub Actions-route.
+De lokale route gebruikt dezelfde resolver, toolbootstrap, cachecontrole, captionruntime, history-export en resultaatvalidator als de self-hosted GitHub Actions-route. Na afloop worden ook `cache_hit`, `captions_done` en `processed_entries` getoond.
 
 Zie `docs/SELF-HOSTED-RUNNER.md` voor de dedicated runner.
 
