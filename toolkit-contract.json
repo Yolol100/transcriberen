@@ -8,7 +8,7 @@
   "requires_mcp": false,
   "runtime_target": "self-hosted-or-local-direct-network",
   "inputs": ["youtube-video-url", "youtube-short-url", "optional-language"],
-  "outputs": ["result.json", "transcript.txt when captions exist", "SHA256SUMS.txt"],
+  "outputs": ["result.json", "transcript.txt when captions exist", "processed-index.json", "SHA256SUMS.txt"],
   "tools": [
     {
       "id": "yt-dlp",
@@ -31,6 +31,8 @@
     "With an explicit language, an exact language code is preferred before a broader family match; manual beats automatic for the same exact language. With language=auto, English then Dutch then another language is selected, with manual before automatic within a language.",
     "If no caption track exists, the request succeeds with status skipped_no_captions and no transcript file.",
     "The acquisition job runs only on a dedicated self-hosted Linux x64 runner or through scripts/run_local.sh on a normal direct network connection.",
+    "Successful transcripts are cached on the trusted execution host by video ID and requested language, so an already processed caption can be returned without another YouTube request.",
+    "The persistent host cache is execution state, not repository or project truth; it is never committed to main. processed-index.json is a per-run readback export without transcript text.",
     "No comments, channel or playlist discovery, search, ranking, topic filtering, engagement data, knowledge handoff, article/feed/sitemap extraction, audio fallback or Whisper exists in this runtime.",
     "No cookies, login, proxy, CAPTCHA bypass, PO token or media download is used.",
     "Deno is passed explicitly to yt-dlp through --js-runtimes; it is not a dead prerequisite.",
