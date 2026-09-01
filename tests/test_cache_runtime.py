@@ -44,6 +44,13 @@ class CacheRuntimeTests(unittest.TestCase):
         )
         self.env.start()
         self.addCleanup(self.env.stop)
+        self.provenance = mock.patch.object(
+            m.runtime,
+            "runtime_provenance",
+            return_value={"execution_target": "test"},
+        )
+        self.provenance.start()
+        self.addCleanup(self.provenance.stop)
         self.old_results = m.RESULTS
         self.old_runtime_results = m.runtime.RESULTS
         m.RESULTS = self.results
