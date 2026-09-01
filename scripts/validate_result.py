@@ -26,6 +26,8 @@ def validate(path: Path) -> None:
         raise ValueError("result schema_version must be 2.1")
     if data.get("status") not in ALLOWED_STATUSES:
         raise ValueError("invalid result status")
+    if data.get("cache_hit") not in {None, True, False}:
+        raise ValueError("cache_hit must be boolean when present")
 
     source = data.get("source") or {}
     source_type = source.get("type")
@@ -98,7 +100,19 @@ def validate(path: Path) -> None:
         if status in {"access_blocked", "error"} and not str(data.get("error") or "").strip():
             raise ValueError("failed result requires error detail")
 
-    allowed_files = {"result.json", "transcript.txt", "SHA256SUMS.txt"}
+    index_path = RESULTS / "processed-index.json"
+    if index_path.exists():
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        if index.get("schema_version") != "1.0":
+            raise ValueError("processed-index schema_version must be 1.0")
+        for key in ("unique_videos", "processed_entries", "captions_done"):
+            value = index.get(key)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"processed-index {key} must be a non-negative integer")
+        if not isinstance(index.get("items"), list):
+            raise ValueError("processed-index items must be a list")
+
+    allowed_files = {"result.json", "transcript.txt", "processed-index.json", "SHA256SUMS.txt"}
     for item in RESULTS.rglob("*"):
         if item.is_dir():
             continue
