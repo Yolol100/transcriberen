@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "capability_id": "external-youtube-caption-corpus-intake",
+  "repository": "Yolol100/transcriberen",
+  "evidence_role": "local_validation_and_normalization_of_user_supplied_caption_corpora",
+  "requires_account": false,
+  "requires_api_key": false,
+  "requires_mcp": false,
+  "runtime_target": "local-file-intake-only",
+  "inputs": [
+    "user-supplied-zip",
+    "user-supplied-extracted-payload"
+  ],
+  "outputs": [
+    "external-corpus-intake.json",
+    "candidate-index.json",
+    "candidate-index.csv"
+  ],
+  "boundaries": [
+    "This capability does not perform YouTube search, channel discovery, playlist discovery, network acquisition, media download, login, cookie use, proxying, CAPTCHA bypass or PO-token handling.",
+    "The existing public-youtube-caption-acquisition capability and its toolkit-contract.json remain unchanged and direct-video/Short only.",
+    "Only supplied corpus packages with a consistent receipt, manifest, result ZIP SHA-256 and per-transcript RUN-SHA256 inventory are accepted.",
+    "Archive path traversal, symlinks, duplicate paths, unreasonable member counts and unreasonable uncompressed size are rejected before extraction.",
+    "A partial run can be accepted as evidence only when partial reasons are preserved; partial is never upgraded to success.",
+    "Validated transcript corpora remain evidence/discovery material. They never become project truth, Skill truth or memory truth automatically.",
+    "Promotion of a claim requires claim extraction, deduplication, current primary or official verification when the claim can change, exactly one content owner and owner acceptance.",
+    "Transcript text is not copied into the normalized intake receipt or candidate index; only traceable metadata and SHA-256 values are emitted."
+  ]
+}
