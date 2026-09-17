@@ -19,6 +19,7 @@ jobs:
     outputs:
       run: ${{ steps.resolve.outputs.run }}
       request_id: ${{ steps.resolve.outputs.request_id }}
+      runtime_sha: ${{ steps.runtime_sha.outputs.sha }}
     steps:
       - name: Read immutable queue request
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -57,6 +58,11 @@ jobs:
           ref: main
           persist-credentials: false
           path: runtime
+      - name: Record immutable trusted runtime SHA
+        id: runtime_sha
+        working-directory: runtime
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Resolve channel request
         id: resolve
         working-directory: runtime
@@ -104,16 +110,23 @@ jobs:
           test "$ACTUAL_OS" = 'Linux'
           test "$ACTUAL_ARCH" = 'X64'
 
-      - name: Checkout trusted runtime only
+      - name: Checkout immutable trusted runtime only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: Yolol100/transcriberen
-          ref: main
+          ref: ${{ needs.resolve.outputs.runtime_sha }}
           persist-credentials: false
           clean: true
-      - name: Record runtime SHA
+      - name: Verify immutable runtime SHA
         id: runtime_sha
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        shell: bash
+        env:
+          EXPECTED_RUNTIME_SHA: ${{ needs.resolve.outputs.runtime_sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_RUNTIME_SHA"
+          echo "sha=$actual" >> "$GITHUB_OUTPUT"
       - name: Set up Python 3.12
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
