@@ -19,14 +19,14 @@ jobs:
     outputs:
       run: ${{ steps.resolve.outputs.run }}
       request_id: ${{ steps.resolve.outputs.request_id }}
+      runtime_sha: ${{ steps.runtime_sha.outputs.sha }}
     steps:
       - name: Read immutable queue request
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 2
           persist-credentials: false
           path: transport
-
       - name: Validate queue transport
         shell: bash
         env:
@@ -37,68 +37,160 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           import json, os, pathlib, re, subprocess
-          root = pathlib.Path('transport')
-          changed = subprocess.check_output(
-              ['git', '-C', str(root), 'diff', '--name-status', os.environ['BEFORE'], os.environ['AFTER']],
-              text=True,
-          ).splitlines()
-          accepted = []
+          root=pathlib.Path('transport')
+          changed=subprocess.check_output(['git','-C',str(root),'diff','--name-status',os.environ['BEFORE'],os.environ['AFTER']], text=True).splitlines()
+          accepted=[]
           for line in changed:
-              parts = line.split('\t')
-              if len(parts) == 2 and parts[0] == 'A' and re.fullmatch(
-                  r'requests/queue/[A-Za-z0-9][A-Za-z0-9._-]{2,79}\.json', parts[1]
-              ):
-                  accepted.append(parts[1])
-              elif line.strip():
-                  raise SystemExit(f'queue may add exactly one request JSON and nothing else: {line}')
-          if len(accepted) != 1:
-              raise SystemExit(f'expected exactly one new queue request, got {len(accepted)}')
-          source = root / accepted[0]
-          request = json.loads(source.read_text(encoding='utf-8'))
-          request_id = str(request.get('request_id') or '')
-          if source.stem != request_id:
-              raise SystemExit('queue filename must equal request_id')
-          if request.get('enabled') is not True:
-              raise SystemExit('queue request must set enabled=true')
-          target = pathlib.Path(os.environ['RUNNER_TEMP_DIR']) / 'incoming-request.json'
-          target.write_text(json.dumps(request, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+              parts=line.split('\t')
+              if len(parts)==2 and parts[0]=='A' and re.fullmatch(r'requests/queue/[A-Za-z0-9][A-Za-z0-9._-]{2,79}\.json', parts[1]): accepted.append(parts[1])
+              elif line.strip(): raise SystemExit(f'queue may add exactly one request JSON and nothing else: {line}')
+          if len(accepted)!=1: raise SystemExit(f'expected exactly one new queue request, got {len(accepted)}')
+          source=root/accepted[0]
+          request=json.loads(source.read_text(encoding='utf-8'))
+          if source.stem != str(request.get('request_id') or ''): raise SystemExit('queue filename must equal request_id')
+          target=pathlib.Path(os.environ['RUNNER_TEMP_DIR'])/'incoming-request.json'
+          target.write_text(json.dumps(request, ensure_ascii=False, indent=2)+'\n', encoding='utf-8')
           PY
-
       - name: Checkout trusted runtime
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: Yolol100/transcriberen
           ref: main
           persist-credentials: false
           path: runtime
-
-      - name: Resolve request
+      - name: Record immutable trusted runtime SHA
+        id: runtime_sha
+        working-directory: runtime
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Resolve channel request
         id: resolve
         working-directory: runtime
         env:
           REQUEST_FILE: ${{ runner.temp }}/incoming-request.json
         run: python3 scripts/resolve_request.py
-
       - name: Upload resolved request
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: resolved-transcription-request
           path: runtime/resolved-request.json
           retention-days: 1
           if-no-files-found: error
-
-      - name: Publish pending self-hosted runtime status
+      - name: Publish pending hybrid runtime status
         if: steps.resolve.outputs.run == 'true'
         working-directory: runtime
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 scripts/publish_ci_status.py --context 'runtime/Transcribe Public Source' --result pending
 
-  runtime:
+  hosted_attempt:
     needs: resolve
-    if: needs.resolve.outputs.run == 'true' && github.repository == 'Yolol100/transcriberen'
+    if: ${{ needs.resolve.outputs.run == 'true' && github.repository == 'Yolol100/transcriberen' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+      statuses: write
+    outputs:
+      fallback_required: ${{ steps.classify.outputs.fallback_required }}
+      acquisition_status: ${{ steps.classify.outputs.status }}
+      fallback_reason: ${{ steps.classify.outputs.reason }}
+    concurrency:
+      group: transcribe-${{ needs.resolve.outputs.request_id }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout immutable trusted runtime only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: Yolol100/transcriberen
+          ref: ${{ needs.resolve.outputs.runtime_sha }}
+          persist-credentials: false
+          clean: true
+      - name: Verify immutable runtime SHA
+        id: runtime_sha
+        shell: bash
+        env:
+          EXPECTED_RUNTIME_SHA: ${{ needs.resolve.outputs.runtime_sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_RUNTIME_SHA"
+          echo "sha=$actual" >> "$GITHUB_OUTPUT"
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Download resolved request
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: resolved-transcription-request
+      - name: Provision exact caption tools
+        run: bash scripts/install_tools.sh
+      - name: Build 2026 channel corpus on GitHub-hosted runner
+        env:
+          REQUEST_FILE: resolved-request.json
+          GITHUB_SHA: ${{ steps.runtime_sha.outputs.sha }}
+          TRANSCRIBE_EXECUTION_TARGET: github-hosted
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy || true
+          python3 scripts/channel_runtime.py
+      - name: Validate hosted channel result contract
+        run: python3 scripts/validate_result.py results/result.json
+      - name: Classify hosted result for fallback
+        id: classify
+        run: python3 scripts/classify_hybrid_result.py results/result.json
+      - name: Build deterministic checksum receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd results && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum | sed 's#  \./#  #' > SHA256SUMS.txt && test -s SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+      - name: Upload hosted diagnostic attempt
+        if: ${{ steps.classify.outputs.fallback_required == 'true' || steps.classify.outputs.status == 'error' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: hosted-attempt-${{ needs.resolve.outputs.request_id }}
+          path: results/
+          retention-days: 3
+          if-no-files-found: error
+      - name: Attest hosted final checksum receipt
+        if: ${{ steps.classify.outputs.fallback_required != 'true' && steps.classify.outputs.status != 'error' }}
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: results/SHA256SUMS.txt
+      - name: Upload hosted final result
+        if: ${{ steps.classify.outputs.fallback_required != 'true' && steps.classify.outputs.status != 'error' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: transcription-result-${{ needs.resolve.outputs.request_id }}
+          path: results/
+          retention-days: 3
+          if-no-files-found: error
+      - name: Fail on non-blocking hosted acquisition error
+        if: ${{ steps.classify.outputs.status == 'error' }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          result=json.load(open('results/result.json', encoding='utf-8'))
+          raise SystemExit(result.get('error') or 'hosted acquisition error')
+          PY
+      - name: Publish hosted terminal queue-run status
+        if: ${{ always() && steps.classify.outputs.fallback_required != 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish_ci_status.py --context 'runtime/Transcribe Public Source' --result '${{ job.status }}'
+
+  self_hosted_fallback:
+    needs: [resolve, hosted_attempt]
+    if: ${{ needs.resolve.outputs.run == 'true' && needs.hosted_attempt.result == 'success' && needs.hosted_attempt.outputs.fallback_required == 'true' && github.repository == 'Yolol100/transcriberen' }}
     runs-on: [self-hosted, linux, x64, webactueel-transcribe]
-    timeout-minutes: 30
+    timeout-minutes: 360
     permissions:
       contents: read
       id-token: write
@@ -120,34 +212,34 @@ jobs:
           test "$ACTUAL_ENVIRONMENT" = 'self-hosted'
           test "$ACTUAL_OS" = 'Linux'
           test "$ACTUAL_ARCH" = 'X64'
-
-      - name: Checkout trusted runtime only
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Checkout immutable trusted runtime only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: Yolol100/transcriberen
-          ref: main
+          ref: ${{ needs.resolve.outputs.runtime_sha }}
           persist-credentials: false
           clean: true
-
-      - name: Record runtime SHA
+      - name: Verify immutable runtime SHA
         id: runtime_sha
         shell: bash
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
+        env:
+          EXPECTED_RUNTIME_SHA: ${{ needs.resolve.outputs.runtime_sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_RUNTIME_SHA"
+          echo "sha=$actual" >> "$GITHUB_OUTPUT"
       - name: Set up Python 3.12
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
-
       - name: Download resolved request
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: resolved-transcription-request
-
       - name: Provision exact caption tools
         run: bash scripts/install_tools.sh
-
-      - name: Extract one public caption track
+      - name: Build 2026 channel corpus on self-hosted fallback
         env:
           REQUEST_FILE: resolved-request.json
           GITHUB_SHA: ${{ steps.runtime_sha.outputs.sha }}
@@ -156,53 +248,33 @@ jobs:
         run: |
           set -euo pipefail
           unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy || true
-          python3 scripts/captions_runtime.py
-
-      - name: Validate minimal result contract
-        id: result_validation
+          python3 scripts/channel_runtime.py
+      - name: Validate fallback channel result contract
         run: python3 scripts/validate_result.py results/result.json
-
       - name: Build deterministic checksum receipt
         shell: bash
         run: |
           set -euo pipefail
-          (
-            cd results
-            find . -type f ! -name SHA256SUMS.txt -print0 \
-              | sort -z \
-              | xargs -0 sha256sum \
-              | sed 's#  \./#  #' \
-              > SHA256SUMS.txt
-            test -s SHA256SUMS.txt
-            sha256sum -c SHA256SUMS.txt
-          )
-
+          (cd results && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum | sed 's#  \./#  #' > SHA256SUMS.txt && test -s SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
       - name: Attest result checksum receipt
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
         with:
           subject-path: results/SHA256SUMS.txt
-
       - name: Upload validated result
-        if: steps.result_validation.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: transcription-result-${{ needs.resolve.outputs.request_id }}
           path: results/
           retention-days: 3
           if-no-files-found: error
-
-      - name: Fail only on acquisition errors
+      - name: Fail only on channel acquisition failure
         shell: bash
         run: |
           python3 - <<'PY'
           import json
-          result = json.load(open('results/result.json', encoding='utf-8'))
-          status = result['status']
-          print(f'status={status}')
-          if status in {'access_blocked', 'error'}:
-              raise SystemExit(result.get('error') or status)
+          result=json.load(open('results/result.json', encoding='utf-8'))
+          if result['status'] in {'access_blocked','error'}: raise SystemExit(result.get('error') or result['status'])
           PY
-
       - name: Publish queue-run status and run URL
         if: always()
         env:
