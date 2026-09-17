@@ -22,32 +22,27 @@ class ChannelCacheTests(unittest.TestCase):
             os.environ['TRANSCRIBE_STATE_DIR'] = self.old_state
         self.temp.cleanup()
 
+    def store(self, conn, video_id, language='auto', text='hello\n'):
+        cache.store_result(
+            conn,
+            video_id=video_id,
+            language=language,
+            url=f'https://www.youtube.com/watch?v={video_id}',
+            status='ok',
+            caption={'language':'en','kind':'manual','format':'vtt','cue_count':1},
+            transcript=text,
+        )
+
     def test_valid_transcript_is_reused(self):
         with cache.connect() as conn:
-            cache.store_result(
-                conn,
-                video_id='AAAAAAAAAAA',
-                language='auto',
-                url='https://www.youtube.com/watch?v=AAAAAAAAAAA',
-                status='ok',
-                caption={'language':'en','kind':'manual','format':'vtt','cue_count':1},
-                transcript='hello\n',
-            )
+            self.store(conn, 'AAAAAAAAAAA')
             hit = cache.get_cached_transcript(conn, 'AAAAAAAAAAA', 'auto')
         self.assertIsNotNone(hit)
         self.assertEqual(hit['text'], 'hello\n')
 
     def test_corrupt_transcript_is_invalidated(self):
         with cache.connect() as conn:
-            cache.store_result(
-                conn,
-                video_id='BBBBBBBBBBB',
-                language='auto',
-                url='https://www.youtube.com/watch?v=BBBBBBBBBBB',
-                status='ok',
-                caption={'language':'en','kind':'manual','format':'vtt','cue_count':1},
-                transcript='hello\n',
-            )
+            self.store(conn, 'BBBBBBBBBBB')
             conn.execute("UPDATE processed SET transcript_text='tampered' WHERE video_id='BBBBBBBBBBB'")
             conn.commit()
             hit = cache.get_cached_transcript(conn, 'BBBBBBBBBBB', 'auto')
@@ -55,6 +50,15 @@ class ChannelCacheTests(unittest.TestCase):
         self.assertIsNone(hit)
         self.assertEqual(left, 0)
 
+    def test_export_index_is_scoped_to_current_run(self):
+        with cache.connect() as conn:
+            self.store(conn, 'AAAAAAAAAAA')
+            self.store(conn, 'BBBBBBBBBBB')
+            out = pathlib.Path(self.temp.name) / 'index.json'
+            payload = cache.export_index(conn, out, entries=[('AAAAAAAAAAA', 'auto')])
+        self.assertEqual(payload['scope'], 'current_run')
+        self.assertEqual(payload['requested_entries'], 1)
+        self.assertEqual([item['video_id'] for item in payload['items']], ['AAAAAAAAAAA'])
 
-if __name__ == '__main__':
-    unittest.main()
+
+if __name__ == '__main__': unittest.main()
