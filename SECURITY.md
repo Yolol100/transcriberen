@@ -2,7 +2,7 @@
 
 ## Scope
 
-De runtime verwerkt uitsluitend een publieke YouTube-kanaal-URL, normaliseert die naar `/videos`, inspecteert maximaal 1000 entries en neemt alleen video’s met exacte `upload_date` in 2026 op. Per gematchte video wordt maximaal één publieke captiontrack en maximaal 7 top-level `top`-comments verwerkt.
+De runtime verwerkt uitsluitend een publieke YouTube-kanaal-URL, normaliseert die naar `/videos`, inspecteert maximaal 1000 entries en neemt alleen video's met exacte `upload_date` in 2026 op. Per gematchte video wordt maximaal een publieke captiontrack en maximaal 7 top-level `top`-comments verwerkt.
 
 ## Harde grenzen
 
@@ -24,20 +24,25 @@ De YouTube-acquisitie draait uitsluitend op een dedicated Linux x64 runner met l
 
 De self-hosted job:
 
-- checkt uitsluitend vertrouwde runtimecode vanaf `main` uit;
+- gebruikt exact dezelfde vertrouwde runtime-SHA als de resolve-job heeft vastgelegd;
+- checkt nooit runtimecode vanaf de transportbranch uit;
 - gebruikt `persist-credentials: false`;
-- controleert runner environment/OS/architectuur vóór acquisitie;
-- verwijdert proxy-omgevingsvariabelen vóór acquisitie;
+- controleert runner environment/OS/architectuur voor acquisitie;
+- verwijdert proxy-omgevingsvariabelen voor acquisitie;
 - hoort op een dedicated host zonder persoonlijke browserprofielen, SSH/cloudcredentials of projectsecrets te draaien.
 
 ## Uitvoer en integriteit
 
 - yt-dlp gebruikt `--skip-download` en `--no-cookies`;
+- no-replies gebruikt expliciet `max-depth=1` plus runtime filtering;
 - de validator weigert bekende media-extensies;
-- alleen 2026-items mogen in `manifest.json` staan;
-- commentbestanden mogen nooit meer dan 7 comments bevatten en replies blijven uitgesloten;
-- ZIP-paden worden begrensd en het archief moet manifest/result/progress bevatten;
+- alleen bewezen 2026-items mogen in `manifest.json` staan;
+- metadatafouten worden als `unresolved` bewaard in plaats van stil overgeslagen;
+- commentbestanden mogen nooit meer dan 7 comments bevatten;
+- ontbrekende comments/captionfouten/metadatafouten maken de run `partial` in plaats van vals `ok`;
+- ZIP-paden worden begrensd en het archief moet manifest/result/progress/index bevatten;
 - captioncache wordt alleen hergebruikt na SHA- en lengtecontrole;
+- `processed-index.json` bevat alleen current-run entries en lekt geen oude cachehistorie uit andere runs;
 - comments worden per run opnieuw opgehaald en niet als duurzame waarheid gecachet;
 - resultaten krijgen SHA256SUMS en een GitHub attestation.
 
