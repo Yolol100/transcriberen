@@ -57,7 +57,10 @@ def digest(text: str) -> str:
 
 
 def get_cached_transcript(conn: sqlite3.Connection, video_id: str, language: str) -> dict | None:
-    row = conn.execute("SELECT * FROM processed WHERE video_id=? AND requested_language=? AND status='ok'", (video_id, language)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM processed WHERE video_id=? AND requested_language=? AND status='ok'",
+        (video_id, language),
+    ).fetchone()
     if row is None:
         return None
     text = row["transcript_text"]
@@ -65,21 +68,47 @@ def get_cached_transcript(conn: sqlite3.Connection, video_id: str, language: str
         return None
     normalized = text.rstrip() + "\n"
     if digest(normalized) != row["transcript_sha256"] or len(normalized) != row["transcript_chars"]:
-        conn.execute("DELETE FROM processed WHERE video_id=? AND requested_language=?", (video_id, language))
+        conn.execute(
+            "DELETE FROM processed WHERE video_id=? AND requested_language=?",
+            (video_id, language),
+        )
         conn.commit()
         return None
-    conn.execute("UPDATE processed SET last_cache_hit=1, last_processed_at=? WHERE video_id=? AND requested_language=?", (utc_now(), video_id, language))
+    conn.execute(
+        "UPDATE processed SET last_cache_hit=1, last_processed_at=? WHERE video_id=? AND requested_language=?",
+        (utc_now(), video_id, language),
+    )
     conn.commit()
     return {
         "text": normalized,
-        "caption": {"language": row["caption_language"], "kind": row["caption_kind"], "format": row["caption_format"], "cue_count": row["cue_count"]},
+        "caption": {
+            "language": row["caption_language"],
+            "kind": row["caption_kind"],
+            "format": row["caption_format"],
+            "cue_count": row["cue_count"],
+        },
         "sha256": row["transcript_sha256"],
     }
 
 
-def store_result(conn: sqlite3.Connection, *, video_id: str, language: str, url: str, status: str, caption: dict | None, transcript: str | None, upload_date: str = "", title: str = "") -> None:
+def store_result(
+    conn: sqlite3.Connection,
+    *,
+    video_id: str,
+    language: str,
+    url: str,
+    status: str,
+    caption: dict | None,
+    transcript: str | None,
+    upload_date: str = "",
+    title: str = "",
+) -> None:
+    del upload_date, title
     now = utc_now()
-    current = conn.execute("SELECT first_processed_at, attempt_count FROM processed WHERE video_id=? AND requested_language=?", (video_id, language)).fetchone()
+    current = conn.execute(
+        "SELECT first_processed_at, attempt_count FROM processed WHERE video_id=? AND requested_language=?",
+        (video_id, language),
+    ).fetchone()
     first = current["first_processed_at"] if current else now
     attempts = int(current["attempt_count"]) + 1 if current else 1
     normalized = transcript.rstrip() + "\n" if transcript else None
@@ -99,18 +128,45 @@ def store_result(conn: sqlite3.Connection, *, video_id: str, language: str, url:
             transcript_sha256=excluded.transcript_sha256, transcript_chars=excluded.transcript_chars,
             transcript_text=excluded.transcript_text, last_processed_at=excluded.last_processed_at,
             attempt_count=excluded.attempt_count, last_cache_hit=0
-    """, (video_id, language, url, status, caption.get("language"), caption.get("kind"), caption.get("format"), caption.get("cue_count"), sha, len(normalized or ""), normalized, first, now, attempts))
+    """, (
+        video_id,
+        language,
+        url,
+        status,
+        caption.get("language"),
+        caption.get("kind"),
+        caption.get("format"),
+        caption.get("cue_count"),
+        sha,
+        len(normalized or ""),
+        normalized,
+        first,
+        now,
+        attempts,
+    ))
     conn.commit()
 
 
-def export_index(conn: sqlite3.Connection, path: Path) -> dict:
-    rows = conn.execute("""
-        SELECT video_id, requested_language, url, status, caption_language, caption_kind,
-               caption_format, cue_count, transcript_sha256, transcript_chars,
-               first_processed_at, last_processed_at, attempt_count, last_cache_hit
-        FROM processed ORDER BY last_processed_at DESC
-    """).fetchall()
-    status_counts = {}
+def export_index(
+    conn: sqlite3.Connection,
+    path: Path,
+    *,
+    entries: list[tuple[str, str]],
+) -> dict:
+    rows = []
+    for video_id, language in sorted(set(entries)):
+        row = conn.execute("""
+            SELECT video_id, requested_language, url, status, caption_language, caption_kind,
+                   caption_format, cue_count, transcript_sha256, transcript_chars,
+                   first_processed_at, last_processed_at, attempt_count, last_cache_hit
+            FROM processed
+            WHERE video_id=? AND requested_language=?
+        """, (video_id, language)).fetchone()
+        if row is not None:
+            rows.append(row)
+    rows.sort(key=lambda row: str(row["last_processed_at"]), reverse=True)
+
+    status_counts: dict[str, int] = {}
     unique_videos = set()
     items = []
     for row in rows:
@@ -137,12 +193,15 @@ def export_index(conn: sqlite3.Connection, path: Path) -> dict:
         })
     payload = {
         "schema_version": "2.0",
+        "scope": "current_run",
         "generated_at": utc_now(),
+        "requested_entries": len(set(entries)),
         "unique_videos": len(unique_videos),
         "processed_entries": len(rows),
         "captions_done": status_counts.get("ok", 0),
         "status_counts": status_counts,
         "items": items,
     }
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return payload
