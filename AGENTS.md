@@ -17,4 +17,4 @@ Publiek YouTube-kanaal -> `/videos` -> maximaal 1000 entries inspecteren -> alle
 
 YouTube-acquisitie draait alleen lokaal of op `[self-hosted, linux, x64, webactueel-transcribe]`. GitHub-hosted jobs valideren alleen de append-only requestqueue.
 
-Update tests, `toolkit-contract.json`, security/threat-model en doctor bij iedere scopewijziging. Run vóór merge: Python compile, shell syntax, unittest-suite en repository doctor.
+Update tests, `toolkit-contract.json`, security/threat-model en doctor bij iedere scopewijziging. Run voor merge: Python compile, shell syntax, unittest-suite en repository doctor.
