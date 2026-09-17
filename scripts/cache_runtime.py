@@ -70,7 +70,11 @@ def get_cached_transcript(conn: sqlite3.Connection, video_id: str, language: str
         return None
     conn.execute("UPDATE processed SET last_cache_hit=1, last_processed_at=? WHERE video_id=? AND requested_language=?", (utc_now(), video_id, language))
     conn.commit()
-    return {"text": normalized, "caption": {"language": row["caption_language"], "kind": row["caption_kind"], "format": row["caption_format"], "cue_count": row["cue_count"]}, "sha256": row["transcript_sha256"]}
+    return {
+        "text": normalized,
+        "caption": {"language": row["caption_language"], "kind": row["caption_kind"], "format": row["caption_format"], "cue_count": row["cue_count"]},
+        "sha256": row["transcript_sha256"],
+    }
 
 
 def store_result(conn: sqlite3.Connection, *, video_id: str, language: str, url: str, status: str, caption: dict | None, transcript: str | None, upload_date: str = "", title: str = "") -> None:
@@ -106,6 +110,39 @@ def export_index(conn: sqlite3.Connection, path: Path) -> dict:
                first_processed_at, last_processed_at, attempt_count, last_cache_hit
         FROM processed ORDER BY last_processed_at DESC
     """).fetchall()
-    payload = {"schema_version": "2.0", "generated_at": utc_now(), "processed_entries": len(rows), "captions_done": sum(1 for row in rows if row["status"] == "ok"), "items": [{"video_id": row["video_id"], "requested_language": row["requested_language"], "url": row["url"], "status": row["status"], "caption": {"language": row["caption_language"], "kind": row["caption_kind"], "format": row["caption_format"], "cue_count": row["cue_count"]} if row["status"] == "ok" else None, "transcript_sha256": row["transcript_sha256"], "transcript_chars": row["transcript_chars"], "first_processed_at": row["first_processed_at"], "last_processed_at": row["last_processed_at"], "attempt_count": row["attempt_count"], "last_cache_hit": bool(row["last_cache_hit"])} for row in rows]}
+    status_counts = {}
+    unique_videos = set()
+    items = []
+    for row in rows:
+        status = str(row["status"])
+        status_counts[status] = status_counts.get(status, 0) + 1
+        unique_videos.add(row["video_id"])
+        items.append({
+            "video_id": row["video_id"],
+            "requested_language": row["requested_language"],
+            "url": row["url"],
+            "status": status,
+            "caption": {
+                "language": row["caption_language"],
+                "kind": row["caption_kind"],
+                "format": row["caption_format"],
+                "cue_count": row["cue_count"],
+            } if status == "ok" else None,
+            "transcript_sha256": row["transcript_sha256"],
+            "transcript_chars": row["transcript_chars"],
+            "first_processed_at": row["first_processed_at"],
+            "last_processed_at": row["last_processed_at"],
+            "attempt_count": row["attempt_count"],
+            "last_cache_hit": bool(row["last_cache_hit"]),
+        })
+    payload = {
+        "schema_version": "2.0",
+        "generated_at": utc_now(),
+        "unique_videos": len(unique_videos),
+        "processed_entries": len(rows),
+        "captions_done": status_counts.get("ok", 0),
+        "status_counts": status_counts,
+        "items": items,
+    }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return payload
