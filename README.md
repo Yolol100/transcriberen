@@ -1,10 +1,10 @@
 # Webactueel Transcriberen Runtime
 
-> **Portfoliostatus:** Actief ondersteunend · Webactueel transcriptieruntime
+> **Portfoliostatus:** Actief ondersteunend - Webactueel transcriptieruntime
 
 **Rol:** publieke YouTube-kanaalcaptions en begrensde commentcontext verzamelen als evidence/discovery-input. Inhoudelijke acceptatie en promotie naar Skills/projectbronnen blijft buiten deze repository.
 
-Deze repository heeft nu één publieke acquisitietaak:
+Deze repository heeft nu een publieke acquisitietaak:
 
 **YouTube-kanaal -> `/videos` -> maximaal 1000 entries -> alleen uploadjaar 2026 -> publieke captiontekst + maximaal 7 top-level comments per video -> gevalideerd corpus + ZIP.**
 
@@ -18,10 +18,10 @@ De oude directe single-video/Short-ingang bestaat niet meer.
 - legacy `/c/` en `/user/` kanaalvormen
 - optionele captiontaal via `language`; standaard `auto`
 - maximaal 1000 entries van de `/videos`-tab
-- alleen video’s met exacte `upload_date` in 2026
-- één gekozen publieke captiontrack per video
+- alleen video's met exacte `upload_date` in 2026
+- een gekozen publieke captiontrack per video
 - maximaal 7 YouTube-side `top` gesorteerde top-level comments per video
-- manifest, voortgang, cache-index, checksums en deterministische ZIP
+- manifest, voortgang, run-scoped cache-index, checksums en deterministische ZIP
 
 Captionkeuze bij `language=auto`: Engels, daarna Nederlands, daarna de eerste andere bruikbare taal. Binnen dezelfde taal wint handmatige ondertiteling van automatisch gegenereerde ondertiteling. Automatisch vertaalde tracks worden uitgesloten.
 
@@ -38,9 +38,11 @@ Captionkeuze bij `language=auto`: Engels, daarna Nederlands, daarna de eerste an
 
 ## Waarom self-hosted
 
-GitHub-hosted cloud-IP’s kunnen door YouTube worden geblokkeerd. Daarom valideert de GitHub-hosted `resolve`-job alleen het append-only queue-request; echte YouTube-acquisitie draait op:
+GitHub-hosted cloud-IP's kunnen door YouTube worden geblokkeerd. Daarom valideert de GitHub-hosted `resolve`-job alleen het append-only queue-request; echte YouTube-acquisitie draait op:
 
 `[self-hosted, linux, x64, webactueel-transcribe]`
+
+De resolve-job legt eerst de exacte vertrouwde `main`-commit vast. De self-hosted runtime checkt vervolgens precies die SHA uit en verifieert de readback voordat acquisitie start. Een wijziging op `main` tussen resolve en runtime kan daardoor niet stil een andere runtime laten uitvoeren.
 
 Na requestvalidatie wordt `pending` gepubliceerd. De self-hosted job vervangt dit na uitvoering door het echte resultaat. Als YouTube ook de normale verbinding van de dedicated host blokkeert, blijft dat zichtbaar als `access_blocked`; de runtime omzeilt dit niet.
 
@@ -69,17 +71,17 @@ Operationele requests worden append-only toegevoegd op branch `runtime-requests`
 
 `requests/queue/<request_id>.json`
 
-De bestandsnaam moet exact gelijk zijn aan `request_id`. De transportcommit mag precies één nieuw requestbestand toevoegen. De self-hosted runner voert nooit code vanaf de transportbranch uit; hij checkt uitsluitend `Yolol100/transcriberen@main` uit.
+De bestandsnaam moet exact gelijk zijn aan `request_id`. De transportcommit mag precies een nieuw requestbestand toevoegen. De self-hosted runner voert nooit code vanaf de transportbranch uit.
 
 ## Cache en hervatten
 
-Gevalideerde captions worden op de trusted execution host gecachet op `video_id + requested_language`. De transcript-SHA en lengte worden vóór hergebruik gecontroleerd; corrupte cachedata wordt verwijderd en opnieuw opgehaald.
+Gevalideerde captions worden op de trusted execution host gecachet op `video_id + requested_language`. De transcript-SHA en lengte worden voor hergebruik gecontroleerd; corrupte cachedata wordt verwijderd en opnieuw opgehaald.
 
 Comments worden niet persistent als waarheid gecachet. Iedere nieuwe kanaalrun mag daardoor opnieuw de actuele YouTube-side topselectie proberen op te halen.
 
-De SQLite-database blijft hoststate en wordt nooit naar `main` gecommit. `processed-index.json` bevat alleen technische readback/provenance en geen volledige transcripttekst.
+De SQLite-database blijft hoststate en wordt nooit naar `main` gecommit. `processed-index.json` is expliciet `current_run`: alleen de videos uit de huidige corpusrun worden geexporteerd. Oude cachehistorie van andere kanalen of eerdere runs komt niet in de ZIP terecht.
 
-## Output
+## Output en volledigheid
 
 Per gematchte 2026-video:
 
@@ -96,16 +98,20 @@ Per run:
 - `results/channel-corpus.zip`
 - `results/SHA256SUMS.txt`
 
-Een video zonder captions blijft zichtbaar als `skipped_no_captions`; comments kunnen dan nog steeds worden opgeslagen. Commentfalen is non-gating voor een geldig transcript en krijgt een eigen status.
+Een video zonder captions blijft zichtbaar als `skipped_no_captions`; dat is geen acquisitiefout. Metadata die niet kan worden opgehaald of geen `upload_date` bevat wordt daarentegen als `unresolved` vastgelegd, omdat lidmaatschap van 2026 dan niet bewezen kan worden. Captionfouten en niet-beschikbare comments blijven per video zichtbaar. Een run met zulke onvolledigheden krijgt `status=partial`, niet `ok`.
+
+Comments blijven non-gating voor een geldig transcript: een commentfout verwijdert of degradeert de caption niet. Het totale corpus wordt wel als gedeeltelijk gemarkeerd zolang gevraagde commentcontext ontbreekt.
+
+Voor no-replies gebruikt de runtime yt-dlp `max_comments=7,7,0,0,1`; `max-depth=1` sluit replies expliciet uit. De runtime filtert replies daarna nogmaals bij readback.
 
 ## Toolchain
 
-De bestaande gepinde toolchain blijft behouden:
+De runtime gebruikt exact gepinde, SHA-256-gecontroleerde binaries:
 
-- yt-dlp nightly `2026.08.20.234504`
-- Deno `2.9.5`
+- yt-dlp nightly `2026.09.16.232951`
+- Deno `2.9.7`
 
-`scripts/install_tools.sh` accepteert alleen de exacte versie of downloadt de vastgelegde release en controleert SHA-256 vóór installatie. yt-dlp draait altijd via de lokale wrapper met Deno expliciet als JS-runtime.
+`scripts/install_tools.sh` accepteert alleen de exacte versie of downloadt de vastgelegde release en controleert SHA-256 voor installatie. yt-dlp draait altijd via de lokale wrapper met Deno expliciet als JS-runtime.
 
 ## Lokaal uitvoeren
 
