@@ -38,10 +38,10 @@ FORBIDDEN = {
 }
 PROJECT_TRUTH_KEYS = {"owner_skill", "owner_mode", "project_id", "source_set_version"}
 PROJECT_TRUTH_MARKERS = {"project-transcriberen", "2.2.0-captions-only"}
-YT_DLP_VERSION = "2026.08.20.234504"
-YT_DLP_SHA256 = "8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93"
-DENO_VERSION = "2.9.5"
-DENO_SHA256 = "8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530"
+YT_DLP_VERSION = "2026.09.16.232951"
+YT_DLP_SHA256 = "f8ca14db511702a5dbfc5a527056312907ddd0914d0b4036f108d6849e17ef61"
+DENO_VERSION = "2.9.7"
+DENO_SHA256 = "c6527f24f4b16031d3ae4fa9f658d5f11534c8d84ce7dc8502420280919c3490"
 FIXED_POLICY = {
     "year": 2026,
     "max_videos": 1000,
@@ -123,7 +123,7 @@ def run_checks(root: Path = ROOT) -> dict:
             ('"--skip-download"', "caption engine may download media"),
             ('"--no-cookies"', "caption engine cookie boundary missing"),
             ('comment_sort=top', "YouTube comment top-sort missing"),
-            ('max_comments={limit},{limit},0,0,0', "comment parent/reply limits missing"),
+            ('max_comments={limit},{limit},0,0,1', "comment no-reply depth limit missing"),
         ):
             if needle not in text:
                 failures.append(message)
@@ -136,9 +136,13 @@ def run_checks(root: Path = ROOT) -> dict:
     if channel.is_file():
         text = channel.read_text(encoding="utf-8")
         for needle, message in (
-            ('"--playlist-end", str(max_videos)', "channel discovery is not bounded"),
+            ('"--playlist-end"', "channel discovery is not bounded"),
+            ('str(max_videos)', "channel discovery limit is not bound to max_videos"),
             ('upload_date.startswith("2026")', "exact 2026 filtering missing"),
             ('load_top_comments', "per-video comments are not acquired"),
+            ('"metadata_failures"', "metadata failures are not counted"),
+            ('"partial_reasons"', "partial corpus reasons are not emitted"),
+            ('"unresolved"', "unresolved metadata evidence is not emitted"),
             ('channel-corpus.zip', "channel ZIP output missing"),
         ):
             if needle not in text:
@@ -151,6 +155,19 @@ def run_checks(root: Path = ROOT) -> dict:
             ("history.sqlite3", "persistent cache database is not configured"),
             ("PRIMARY KEY (video_id, requested_language)", "cache does not deduplicate by video/language"),
             ("transcript_sha256", "cache transcript-integrity evidence missing"),
+            ('"scope": "current_run"', "processed index is not scoped to the current run"),
+            ("entries: list[tuple[str, str]]", "processed index lacks explicit current-run selection"),
+        ):
+            if needle not in text:
+                failures.append(message)
+
+    validator = root / "scripts/validate_result.py"
+    if validator.is_file():
+        text = validator.read_text(encoding="utf-8")
+        for needle, message in (
+            ("processed-index must contain exactly the current run video ids", "validator does not prevent cross-run cache leakage"),
+            ("incomplete corpus may not report status ok", "validator does not reject false complete status"),
+            ("metadata_failures must equal unresolved count", "validator does not reconcile metadata failures"),
         ):
             if needle not in text:
                 failures.append(message)
@@ -178,6 +195,9 @@ def run_checks(root: Path = ROOT) -> dict:
             ("--result pending", "queue workflow does not publish pending self-hosted status"),
             ("Verify dedicated runner boundary", "runner boundary verification was removed"),
             ("Attest result checksum receipt", "result attestation was removed"),
+            ('runtime_sha: ${{ steps.runtime_sha.outputs.sha }}', "resolve job does not expose immutable runtime SHA"),
+            ('ref: ${{ needs.resolve.outputs.runtime_sha }}', "runtime job is not pinned to resolved runtime SHA"),
+            ('test "$actual" = "$EXPECTED_RUNTIME_SHA"', "runtime job does not verify immutable runtime SHA"),
         ):
             if needle not in text:
                 failures.append(message)
