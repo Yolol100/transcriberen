@@ -183,7 +183,7 @@ def run_checks(root: Path = ROOT) -> dict:
             ("processed-index must contain exactly the current run video ids", "validator does not prevent cross-run cache leakage"),
             ("incomplete corpus may not report status ok", "validator does not reject false complete status"),
             ("metadata_failures must equal unresolved count", "validator does not reconcile metadata failures"),
-            ('"github-hosted", "validator does not accept GitHub-hosted provenance"),
+            ('"github-hosted"', "validator does not accept GitHub-hosted provenance"),
         ):
             if needle not in text:
                 failures.append(message)
