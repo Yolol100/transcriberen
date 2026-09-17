@@ -36,15 +36,20 @@ Captionkeuze bij `language=auto`: Engels, daarna Nederlands, daarna de eerste an
 - video- of audiodownload
 - cookies, login, browserprofielen, proxies, PO-tokens of CAPTCHA-bypass
 
-## Waarom self-hosted
+## Hybride uitvoering
 
-GitHub-hosted cloud-IP's kunnen door YouTube worden geblokkeerd. Daarom valideert de GitHub-hosted `resolve`-job alleen het append-only queue-request; echte YouTube-acquisitie draait op:
+De queue draait hosted-first:
 
-`[self-hosted, linux, x64, webactueel-transcribe]`
+1. de GitHub-hosted `resolve`-job valideert precies één append-only queue-request en legt de exacte vertrouwde `main`-SHA vast;
+2. een GitHub-hosted `ubuntu-24.04` runner probeert de volledige kanaalacquisitie met precies die immutable SHA;
+3. alleen wanneer het gevalideerde resultaat expliciete `access_blocked`-evidence bevat, start automatisch de dedicated fallback op `[self-hosted, linux, x64, webactueel-transcribe]`;
+4. gewone code- of acquisitiefouten triggeren de self-hosted fallback niet stil.
 
-De resolve-job legt eerst de exacte vertrouwde `main`-commit vast. De self-hosted runtime checkt vervolgens precies die SHA uit en verifieert de readback voordat acquisitie start. Een wijziging op `main` tussen resolve en runtime kan daardoor niet stil een andere runtime laten uitvoeren.
+`access_blocked` wordt niet alleen op kanaaldiscovery herkend, maar ook wanneer metadata, captions of comments aantoonbaar door YouTube anti-bot/rate limiting zijn geblokkeerd. Een gewone `partial` zonder zulke blokkade-evidence blijft het hosted resultaat.
 
-Na requestvalidatie wordt `pending` gepubliceerd. De self-hosted job vervangt dit na uitvoering door het echte resultaat. Als YouTube ook de normale verbinding van de dedicated host blokkeert, blijft dat zichtbaar als `access_blocked`; de runtime omzeilt dit niet.
+De resolve-job, hosted poging en eventuele self-hosted fallback gebruiken allemaal dezelfde vastgelegde runtime-SHA en controleren de readback. Een wijziging op `main` tijdens de run kan daardoor niet stil andere runtimecode laten uitvoeren.
+
+Na requestvalidatie wordt `runtime/Transcribe Public Source` op `pending` gezet. Een succesvolle hosted run publiceert direct het eindresultaat. Bij expliciete blokkade blijft de status pending totdat de self-hosted fallback eindigt. Als ook de fallback wordt geblokkeerd, blijft dat zichtbaar als `access_blocked`; de runtime omzeilt dit niet.
 
 ## Request
 
@@ -71,11 +76,11 @@ Operationele requests worden append-only toegevoegd op branch `runtime-requests`
 
 `requests/queue/<request_id>.json`
 
-De bestandsnaam moet exact gelijk zijn aan `request_id`. De transportcommit mag precies een nieuw requestbestand toevoegen. De self-hosted runner voert nooit code vanaf de transportbranch uit.
+De bestandsnaam moet exact gelijk zijn aan `request_id`. De transportcommit mag precies een nieuw requestbestand toevoegen. Geen acquisitierunner voert code vanaf de transportbranch uit.
 
 ## Cache en hervatten
 
-Gevalideerde captions worden op de trusted execution host gecachet op `video_id + requested_language`. De transcript-SHA en lengte worden voor hergebruik gecontroleerd; corrupte cachedata wordt verwijderd en opnieuw opgehaald.
+Op de dedicated self-hosted/local host worden gevalideerde captions gecachet op `video_id + requested_language`. De transcript-SHA en lengte worden voor hergebruik gecontroleerd; corrupte cachedata wordt verwijderd en opnieuw opgehaald. GitHub-hosted runners zijn ephemeral en delen deze persistente cache niet.
 
 Comments worden niet persistent als waarheid gecachet. Iedere nieuwe kanaalrun mag daardoor opnieuw de actuele YouTube-side topselectie proberen op te halen.
 
@@ -121,7 +126,7 @@ Vereisten: Linux x86_64 of WSL2/Ubuntu, Python 3.12+, `curl` en GNU `sha256sum`.
 bash scripts/run_local.sh requests/transcribe.json
 ```
 
-De lokale route gebruikt dezelfde resolver, toolbootstrap, channel runtime, cache en resultaatvalidator als de self-hosted route.
+De lokale route gebruikt dezelfde resolver, toolbootstrap, channel runtime, cache en resultaatvalidator als de remote routes.
 
 ## Kennisgrens
 
