@@ -1,34 +1,9 @@
 # Security
 
-## Scope
+De runtime accepteert uitsluitend een publieke YouTube-kanaal-URL en verwerkt de `/videos`-tab. Directe video’s, Shorts en playlists zijn geen invoercontract.
 
-De runtime verwerkt uitsluitend een directe publieke YouTube-video- of Short-URL en haalt maximaal één publieke captiontrack op. De runtime downloadt geen video of audio.
+Harde grenzen: geen cookies/login/browserprofielen/proxies, geen CAPTCHA- of PO-token-bypass, geen media-download, geen FFmpeg/Whisper. Alle yt-dlp-videoroutes gebruiken `--skip-download` en `--no-cookies`.
 
-## Harde grenzen
+Per run worden maximaal 1000 kanaalvideo’s geïnspecteerd. Alleen video’s met exact uploadjaar 2026 komen in het corpus. Per gematchte video worden maximaal 7 top-level comments op `top`-sortering gevraagd; replies worden niet opgeslagen. Commentfalen is non-gating en wordt apart gerapporteerd.
 
-- geen cookies of ingelogde sessies;
-- geen browserprofielen of persoonlijke credentials;
-- geen proxyconfiguratie;
-- geen CAPTCHA- of PO-token-bypass;
-- geen media-download;
-- geen comments, channel/search/playlist-discovery of andere bulkacquisitie;
-- geen FFmpeg of Whisper.
-
-Het requestcontract accepteert alleen `enabled`, `request_id`, `url` en `language`. Onbekende velden worden geweigerd.
-
-## Self-hosted runner
-
-De YouTube-acquisitie draait uitsluitend op een dedicated Linux x64 runner met label `webactueel-transcribe`, of lokaal via `scripts/run_local.sh`. De GitHub-hosted job valideert alleen het append-only queue-request.
-
-De self-hosted job:
-
-- checkt uitsluitend vertrouwde runtimecode vanaf `main` uit;
-- gebruikt `persist-credentials: false`;
-- verwijdert proxy-omgevingsvariabelen vóór acquisitie;
-- hoort op een dedicated host zonder persoonlijke browserprofielen, SSH/cloudcredentials of andere projectsecrets te draaien.
-
-## Uitvoer
-
-Alleen minimale bron/captionprovenance en de genormaliseerde transcripttekst worden opgeslagen. Ruwe yt-dlp-metadata wordt niet gepersisteerd. De resultaatvalidator weigert onverwachte artifacts en bekende media-extensies.
-
-Een YouTube anti-botblokkade wordt `access_blocked`; de runtime probeert die niet te omzeilen met cookies, login, proxying of mediafallback.
+Acquisitie draait uitsluitend op de dedicated Linux x64 runner `webactueel-transcribe` of lokaal via `scripts/run_local.sh`. De transportbranch levert nooit uitvoerbare code aan de self-hosted host.

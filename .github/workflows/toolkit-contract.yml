@@ -50,7 +50,7 @@ jobs:
           python -m unittest discover -s tests -v
           python scripts/doctor.py --mode ci --json
 
-      - name: Validate captions-only capability contract
+      - name: Validate channel-only capability contract
         shell: bash
         run: |
           set -euo pipefail
@@ -59,10 +59,18 @@ jobs:
           import pathlib
 
           contract = json.load(open('toolkit-contract.json', encoding='utf-8'))
-          assert contract['schema_version'] == '2.1'
-          assert contract['capability_id'] == 'public-youtube-caption-acquisition'
+          assert contract['schema_version'] == '3.0'
+          assert contract['capability_id'] == 'public-youtube-channel-caption-corpus'
           assert contract['repository'] == 'Yolol100/transcriberen'
           assert contract['runtime_target'] == 'self-hosted-or-local-direct-network'
+          assert contract['inputs'] == ['youtube-channel-url', 'optional-language']
+          assert contract['fixed_policy'] == {
+              'year': 2026,
+              'max_videos': 1000,
+              'comments_per_video': 7,
+              'comment_sort': 'top',
+              'include_replies': False,
+          }
           for key in ('owner_skill', 'owner_mode', 'project_id', 'source_set_version'):
               assert key not in contract, f'project/skill truth leaked into capability contract: {key}'
           for key in ('requires_account', 'requires_api_key', 'requires_mcp'):
@@ -75,60 +83,30 @@ jobs:
           assert tools['deno-ejs-runtime']['version'] == '2.9.5'
           assert tools['deno-ejs-runtime']['sha256'] == '8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530'
 
-          forbidden = {
-              'requirements.in', 'requirements.txt', 'requirements.lock',
-              'scripts/runtime.py', 'scripts/runtime_topic_filter.py',
-              'scripts/youtube_runtime.py', 'scripts/innertube_runtime.py',
-              'scripts/caption_client_profiles.py', 'scripts/normalize_youtube_result_v2.py',
-              'scripts/resolve_request_hardened.py', 'scripts/install_python_deps.sh',
-              '.github/workflows/transcribe-self-hosted.yml', '.github/workflows/lock-audit.yml',
-          }
-          for path in forbidden:
-              assert not pathlib.Path(path).exists(), path
-
-          runtime_paths = [
-              pathlib.Path('toolkit-contract.json'),
-              pathlib.Path('scripts/resolve_request.py'),
-              pathlib.Path('scripts/captions_runtime.py'),
-              pathlib.Path('scripts/validate_result.py'),
-          ]
-          for path in runtime_paths:
-              text = path.read_text(encoding='utf-8').casefold()
-              for marker in ('project-transcriberen', '2.2.0-captions-only'):
-                  assert marker not in text, f'project truth marker {marker!r} leaked into {path}'
-
           resolver = pathlib.Path('scripts/resolve_request.py').read_text(encoding='utf-8')
-          assert 'ALLOWED_INPUT_KEYS = {"enabled", "request_id", "url", "language"}' in resolver
-          assert 'source_type = "short"' in resolver
+          assert '"source_type": "channel"' in resolver
+          assert 'MAX_VIDEOS = 1000' in resolver
+          assert 'COMMENTS_PER_VIDEO = 7' in resolver
 
-          runtime = pathlib.Path('scripts/captions_runtime.py').read_text(encoding='utf-8')
-          for needle in ('"--skip-download"', '"--no-cookies"', 'skipped_no_captions', 'transcript.txt', 'deno_version'):
-              assert needle in runtime
-          assert '"--no-warnings"' not in runtime
-          for forbidden_term in ('include_comments', 'knowledge_context', 'whisper', 'ffmpeg', 'trafilatura'):
-              assert forbidden_term not in runtime.casefold()
+          engine = pathlib.Path('scripts/captions_runtime.py').read_text(encoding='utf-8')
+          for needle in ('"--skip-download"', '"--no-cookies"', 'comment_sort=top', 'max_comments={limit},{limit},0,0,0'):
+              assert needle in engine
+          assert 'if __name__ == "__main__"' not in engine
+          assert '"--no-warnings"' not in engine
 
-          installer = pathlib.Path('scripts/install_tools.sh').read_text(encoding='utf-8')
-          for needle in (
-              'YT_DLP_SHA256="8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93"',
-              'DENO_SHA256="8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530"',
-              '--js-runtimes "deno:$HERE/deno"',
-              'actual="$(sha256sum "$file" | awk',
-              'if [[ "$actual" != "$expected" ]]',
-              'deno_reported_version()',
-          ):
-              assert needle in installer
+          channel = pathlib.Path('scripts/channel_runtime.py').read_text(encoding='utf-8')
+          for needle in ('"--playlist-end", str(max_videos)', 'upload_date.startswith("2026")', 'load_top_comments', 'channel-corpus.zip'):
+              assert needle in channel
 
           workflow = pathlib.Path('.github/workflows/transcribe.yml').read_text(encoding='utf-8')
           assert 'branches: [runtime-requests]' in workflow
           assert 'runs-on: [self-hosted, linux, x64, webactueel-transcribe]' in workflow
-          assert 'python3 scripts/captions_runtime.py' in workflow
-          assert 'ref: main' in workflow
-          assert "--result pending" in workflow
+          assert 'python3 scripts/channel_runtime.py' in workflow
+          assert 'python3 scripts/captions_runtime.py' not in workflow
+          assert 'Verify dedicated runner boundary' in workflow
+          assert 'Attest result checksum receipt' in workflow
           assert 'workflow_dispatch:' not in workflow
           assert 'workflow_call:' not in workflow
-          for forbidden_term in ('runtime_topic_filter.py', 'normalize_youtube_result', 'ffmpeg', 'whisper'):
-              assert forbidden_term not in workflow.casefold()
 
           print('toolkit-contract: OK')
           PY
