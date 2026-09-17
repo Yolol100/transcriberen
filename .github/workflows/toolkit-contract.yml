@@ -62,7 +62,7 @@ jobs:
           assert contract['schema_version'] == '3.0'
           assert contract['capability_id'] == 'public-youtube-channel-caption-corpus'
           assert contract['repository'] == 'Yolol100/transcriberen'
-          assert contract['runtime_target'] == 'self-hosted-or-local-direct-network'
+          assert contract['runtime_target'] == 'github-hosted-first-self-hosted-fallback-or-local-direct-network'
           assert contract['inputs'] == ['youtube-channel-url', 'optional-language']
           assert contract['fixed_policy'] == {
               'year': 2026,
@@ -98,6 +98,10 @@ jobs:
           for needle in ('"--playlist-end"', 'str(max_videos)', 'upload_date.startswith("2026")', 'load_top_comments', '"metadata_failures"', '"partial_reasons"', '"unresolved"', 'channel-corpus.zip'):
               assert needle in channel
 
+          hybrid = pathlib.Path('scripts/classify_hybrid_result.py').read_text(encoding='utf-8')
+          for needle in ('status == "access_blocked"', 'item.get("status") == "access_blocked"', 'item.get("transcript_status") == "access_blocked"', 'item.get("comments_status") == "access_blocked"'):
+              assert needle in hybrid
+
           cache = pathlib.Path('scripts/cache_runtime.py').read_text(encoding='utf-8')
           assert '"scope": "current_run"' in cache
           assert 'entries: list[tuple[str, str]]' in cache
@@ -105,14 +109,21 @@ jobs:
           validator = pathlib.Path('scripts/validate_result.py').read_text(encoding='utf-8')
           assert 'processed-index must contain exactly the current run video ids' in validator
           assert 'incomplete corpus may not report status ok' in validator
+          assert '"github-hosted"' in validator
 
           workflow = pathlib.Path('.github/workflows/transcribe.yml').read_text(encoding='utf-8')
           assert 'branches: [runtime-requests]' in workflow
+          assert 'runs-on: ubuntu-24.04' in workflow
           assert 'runs-on: [self-hosted, linux, x64, webactueel-transcribe]' in workflow
           assert 'python3 scripts/channel_runtime.py' in workflow
+          assert 'python3 scripts/classify_hybrid_result.py' in workflow
           assert 'python3 scripts/captions_runtime.py' not in workflow
           assert 'Verify dedicated runner boundary' in workflow
           assert 'Attest result checksum receipt' in workflow
+          assert 'TRANSCRIBE_EXECUTION_TARGET: github-hosted' in workflow
+          assert 'TRANSCRIBE_EXECUTION_TARGET: self-hosted' in workflow
+          assert "needs.hosted_attempt.outputs.fallback_required == 'true'" in workflow
+          assert "needs.hosted_attempt.result == 'success'" in workflow
           assert 'runtime_sha: ${{ steps.runtime_sha.outputs.sha }}' in workflow
           assert 'ref: ${{ needs.resolve.outputs.runtime_sha }}' in workflow
           assert 'test "$actual" = "$EXPECTED_RUNTIME_SHA"' in workflow
