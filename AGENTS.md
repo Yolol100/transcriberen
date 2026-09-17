@@ -15,6 +15,8 @@ Publiek YouTube-kanaal -> `/videos` -> maximaal 1000 entries inspecteren -> alle
 - comments zijn non-gating; captionstatus blijft zelfstandig zichtbaar;
 - project-/Skillkennis wordt nooit automatisch gepromoveerd.
 
-YouTube-acquisitie draait alleen lokaal of op `[self-hosted, linux, x64, webactueel-transcribe]`. GitHub-hosted jobs valideren alleen de append-only requestqueue.
+Queue-acquisitie probeert eerst GitHub-hosted `ubuntu-24.04`. Alleen expliciete `access_blocked`-evidence mag automatisch doorvallen naar `[self-hosted, linux, x64, webactueel-transcribe]`. Generieke fouten mogen die fallback niet activeren. Lokaal uitvoeren blijft ondersteund.
+
+Resolve, hosted attempt en eventuele fallback gebruiken dezelfde immutable trusted runtime-SHA. Geen acquisitieroute voert runtimecode vanaf de transportbranch uit.
 
 Update tests, `toolkit-contract.json`, security/threat-model en doctor bij iedere scopewijziging. Run voor merge: Python compile, shell syntax, unittest-suite en repository doctor.
