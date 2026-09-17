@@ -18,18 +18,21 @@ De runtime verwerkt uitsluitend een publieke YouTube-kanaal-URL, normaliseert di
 
 Het requestcontract accepteert alleen `enabled`, `request_id`, `url` en `language`. Jaar, 1000-limiet, top-7 en no-replies zijn vaste runtimepolicy en kunnen niet door queue-input worden verruimd.
 
-## Self-hosted runner
+## Hybride runnergrens
 
-De YouTube-acquisitie draait uitsluitend op een dedicated Linux x64 runner met label `webactueel-transcribe`, of lokaal via `scripts/run_local.sh`. De GitHub-hosted job valideert alleen het append-only queue-request.
+De queue probeert YouTube-acquisitie eerst op GitHub-hosted `ubuntu-24.04`. Alleen een gevalideerd resultaat met expliciete `access_blocked`-evidence mag automatisch doorvallen naar de dedicated Linux x64 runner met label `webactueel-transcribe`. Lokaal blijft `scripts/run_local.sh` ondersteund.
 
-De self-hosted job:
+Voor beide remote acquisitieroutes geldt:
 
-- gebruikt exact dezelfde vertrouwde runtime-SHA als de resolve-job heeft vastgelegd;
-- checkt nooit runtimecode vanaf de transportbranch uit;
-- gebruikt `persist-credentials: false`;
-- controleert runner environment/OS/architectuur voor acquisitie;
-- verwijdert proxy-omgevingsvariabelen voor acquisitie;
-- hoort op een dedicated host zonder persoonlijke browserprofielen, SSH/cloudcredentials of projectsecrets te draaien.
+- exact dezelfde vertrouwde runtime-SHA als de resolve-job heeft vastgelegd;
+- nooit runtimecode vanaf de transportbranch uitvoeren;
+- `persist-credentials: false` gebruiken;
+- proxy-omgevingsvariabelen voor acquisitie verwijderen;
+- geen cookies, accounts, browserprofielen of andere YouTube-credentials gebruiken.
+
+De self-hosted fallback controleert bovendien runner environment/OS/architectuur en hoort op een dedicated host zonder persoonlijke browserprofielen, SSH/cloudcredentials of projectsecrets te draaien.
+
+De fallback-classifier kijkt naar kanaaldiscovery, unresolved metadata, captionstatus en commentstatus. Alleen `access_blocked` activeert fallback; generieke `error`-statussen mogen niet stil op de self-hosted host worden herhaald.
 
 ## Uitvoer en integriteit
 
@@ -41,9 +44,9 @@ De self-hosted job:
 - commentbestanden mogen nooit meer dan 7 comments bevatten;
 - ontbrekende comments/captionfouten/metadatafouten maken de run `partial` in plaats van vals `ok`;
 - ZIP-paden worden begrensd en het archief moet manifest/result/progress/index bevatten;
-- captioncache wordt alleen hergebruikt na SHA- en lengtecontrole;
+- captioncache op self-hosted/local wordt alleen hergebruikt na SHA- en lengtecontrole;
 - `processed-index.json` bevat alleen current-run entries en lekt geen oude cachehistorie uit andere runs;
 - comments worden per run opnieuw opgehaald en niet als duurzame waarheid gecachet;
-- resultaten krijgen SHA256SUMS en een GitHub attestation.
+- finale resultaten krijgen SHA256SUMS en een GitHub attestation.
 
-Een YouTube anti-bot- of rate-limitblokkade wordt `access_blocked`; de runtime probeert die niet te omzeilen.
+Een YouTube anti-bot- of rate-limitblokkade wordt `access_blocked`; de runtime probeert die niet te omzeilen. Als de GitHub-hosted poging wordt geblokkeerd, is de self-hosted run alleen een normale direct-network fallback en geen bypassmechanisme.

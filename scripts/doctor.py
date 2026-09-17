@@ -12,6 +12,7 @@ REQUIRED = {
     "scripts/captions_runtime.py",
     "scripts/channel_runtime.py",
     "scripts/cache_runtime.py",
+    "scripts/classify_hybrid_result.py",
     "scripts/validate_result.py",
     "scripts/install_tools.sh",
     "scripts/run_local.sh",
@@ -42,6 +43,7 @@ YT_DLP_VERSION = "2026.09.16.232951"
 YT_DLP_SHA256 = "f8ca14db511702a5dbfc5a527056312907ddd0914d0b4036f108d6849e17ef61"
 DENO_VERSION = "2.9.7"
 DENO_SHA256 = "c6527f24f4b16031d3ae4fa9f658d5f11534c8d84ce7dc8502420280919c3490"
+RUNTIME_TARGET = "github-hosted-first-self-hosted-fallback-or-local-direct-network"
 FIXED_POLICY = {
     "year": 2026,
     "max_videos": 1000,
@@ -67,8 +69,8 @@ def run_checks(root: Path = ROOT) -> dict:
             failures.append("toolkit schema_version must be 3.0")
         if contract.get("capability_id") != "public-youtube-channel-caption-corpus":
             failures.append("toolkit capability_id mismatch")
-        if contract.get("runtime_target") != "self-hosted-or-local-direct-network":
-            failures.append("runtime target must be self-hosted/local direct network")
+        if contract.get("runtime_target") != RUNTIME_TARGET:
+            failures.append("runtime target must be hosted-first with access-block self-hosted fallback or local direct network")
         if contract.get("inputs") != ["youtube-channel-url", "optional-language"]:
             failures.append("toolkit must expose only channel input plus optional language")
         if contract.get("fixed_policy") != FIXED_POLICY:
@@ -91,6 +93,7 @@ def run_checks(root: Path = ROOT) -> dict:
         "scripts/captions_runtime.py",
         "scripts/channel_runtime.py",
         "scripts/cache_runtime.py",
+        "scripts/classify_hybrid_result.py",
         "scripts/validate_result.py",
     )
     for relative in runtime_files:
@@ -148,6 +151,18 @@ def run_checks(root: Path = ROOT) -> dict:
             if needle not in text:
                 failures.append(message)
 
+    hybrid = root / "scripts/classify_hybrid_result.py"
+    if hybrid.is_file():
+        text = hybrid.read_text(encoding="utf-8")
+        for needle, message in (
+            ('status == "access_blocked"', "hybrid classifier does not detect channel access block"),
+            ('item.get("transcript_status") == "access_blocked"', "hybrid classifier does not detect caption access block"),
+            ('item.get("comments_status") == "access_blocked"', "hybrid classifier does not detect comment access block"),
+            ('item.get("status") == "access_blocked"', "hybrid classifier does not detect metadata access block"),
+        ):
+            if needle not in text:
+                failures.append(message)
+
     cache = root / "scripts/cache_runtime.py"
     if cache.is_file():
         text = cache.read_text(encoding="utf-8")
@@ -168,6 +183,7 @@ def run_checks(root: Path = ROOT) -> dict:
             ("processed-index must contain exactly the current run video ids", "validator does not prevent cross-run cache leakage"),
             ("incomplete corpus may not report status ok", "validator does not reject false complete status"),
             ("metadata_failures must equal unresolved count", "validator does not reconcile metadata failures"),
+            ('"github-hosted"', "validator does not accept GitHub-hosted provenance"),
         ):
             if needle not in text:
                 failures.append(message)
@@ -189,15 +205,20 @@ def run_checks(root: Path = ROOT) -> dict:
     if workflow.is_file():
         text = workflow.read_text(encoding="utf-8")
         for needle, message in (
-            ("runs-on: [self-hosted, linux, x64, webactueel-transcribe]", "transcribe workflow is not bound to dedicated self-hosted runner"),
+            ("runs-on: ubuntu-24.04", "transcribe workflow has no GitHub-hosted attempt"),
+            ("runs-on: [self-hosted, linux, x64, webactueel-transcribe]", "transcribe workflow is not bound to dedicated self-hosted fallback runner"),
             ("branches: [runtime-requests]", "transcribe workflow must use runtime-requests branch"),
             ("python3 scripts/channel_runtime.py", "workflow does not run channel runtime"),
-            ("--result pending", "queue workflow does not publish pending self-hosted status"),
+            ("python3 scripts/classify_hybrid_result.py", "workflow does not classify hosted access blocks"),
+            ("needs.hosted_attempt.outputs.fallback_required == 'true'", "self-hosted fallback is not access-block gated"),
+            ("TRANSCRIBE_EXECUTION_TARGET: github-hosted", "hosted attempt provenance target missing"),
+            ("TRANSCRIBE_EXECUTION_TARGET: self-hosted", "self-hosted fallback provenance target missing"),
+            ("--result pending", "queue workflow does not publish pending hybrid status"),
             ("Verify dedicated runner boundary", "runner boundary verification was removed"),
-            ("Attest result checksum receipt", "result attestation was removed"),
+            ("Attest result checksum receipt", "fallback result attestation was removed"),
             ('runtime_sha: ${{ steps.runtime_sha.outputs.sha }}', "resolve job does not expose immutable runtime SHA"),
-            ('ref: ${{ needs.resolve.outputs.runtime_sha }}', "runtime job is not pinned to resolved runtime SHA"),
-            ('test "$actual" = "$EXPECTED_RUNTIME_SHA"', "runtime job does not verify immutable runtime SHA"),
+            ('ref: ${{ needs.resolve.outputs.runtime_sha }}', "runtime jobs are not pinned to resolved runtime SHA"),
+            ('test "$actual" = "$EXPECTED_RUNTIME_SHA"', "runtime jobs do not verify immutable runtime SHA"),
         ):
             if needle not in text:
                 failures.append(message)

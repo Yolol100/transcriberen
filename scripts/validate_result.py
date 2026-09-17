@@ -63,7 +63,7 @@ def validate(path: Path) -> None:
     if not isinstance(provenance, dict):
         raise ValueError("runtime_provenance is required")
     target = str(provenance.get("execution_target") or "")
-    if target not in {"self-hosted", "local", "test"}:
+    if target not in {"github-hosted", "self-hosted", "local", "test"}:
         raise ValueError("invalid runtime_provenance.execution_target")
     if target != "test":
         versions = expected_tool_versions()

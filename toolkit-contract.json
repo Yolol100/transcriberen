@@ -6,7 +6,7 @@
   "requires_account": false,
   "requires_api_key": false,
   "requires_mcp": false,
-  "runtime_target": "self-hosted-or-local-direct-network",
+  "runtime_target": "github-hosted-first-self-hosted-fallback-or-local-direct-network",
   "inputs": ["youtube-channel-url", "optional-language"],
   "fixed_policy": {"year": 2026, "max_videos": 1000, "comments_per_video": 7, "comment_sort": "top", "include_replies": false},
   "outputs": ["result.json", "manifest.json", "progress.json", "processed-index.json", "videos/<video_id>/transcript.txt when captions exist", "videos/<video_id>/comments.json", "videos/<video_id>/metadata.json", "channel-corpus.zip", "SHA256SUMS.txt"],
@@ -23,9 +23,11 @@
     "Unavailable comments do not invalidate a valid transcript, but they make the channel corpus partial rather than complete.",
     "Video metadata that cannot prove the upload year is retained as unresolved evidence and makes the run partial.",
     "processed-index.json is scoped to the current run and never exports unrelated persistent-cache history.",
-    "The same immutable trusted runtime commit is used for request resolution and self-hosted execution.",
+    "Queue execution tries GitHub-hosted acquisition first and uses the dedicated self-hosted runner only when explicit access_blocked evidence is present.",
+    "The same immutable trusted runtime commit is used for request resolution, the GitHub-hosted attempt and any self-hosted fallback.",
+    "Generic acquisition or code errors do not silently trigger the self-hosted fallback.",
     "No cookies, login, proxy, CAPTCHA bypass, PO token or media download is used.",
-    "The persistent host cache stores validated caption text, not project truth; comments are refreshed per run.",
+    "The persistent self-hosted/local cache stores validated caption text, not project truth; comments are refreshed per run.",
     "Project identity, Skill routing and promotion of transcript knowledge are owned outside this repository."
   ]
 }
