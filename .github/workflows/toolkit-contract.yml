@@ -78,10 +78,10 @@ jobs:
 
           tools = {tool['id']: tool for tool in contract['tools']}
           assert set(tools) == {'yt-dlp', 'deno-ejs-runtime'}
-          assert tools['yt-dlp']['version'] == '2026.08.20.234504'
-          assert tools['yt-dlp']['sha256'] == '8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93'
-          assert tools['deno-ejs-runtime']['version'] == '2.9.5'
-          assert tools['deno-ejs-runtime']['sha256'] == '8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530'
+          assert tools['yt-dlp']['version'] == '2026.09.16.232951'
+          assert tools['yt-dlp']['sha256'] == 'f8ca14db511702a5dbfc5a527056312907ddd0914d0b4036f108d6849e17ef61'
+          assert tools['deno-ejs-runtime']['version'] == '2.9.7'
+          assert tools['deno-ejs-runtime']['sha256'] == 'c6527f24f4b16031d3ae4fa9f658d5f11534c8d84ce7dc8502420280919c3490'
 
           resolver = pathlib.Path('scripts/resolve_request.py').read_text(encoding='utf-8')
           assert '"source_type": "channel"' in resolver
@@ -89,14 +89,22 @@ jobs:
           assert 'COMMENTS_PER_VIDEO = 7' in resolver
 
           engine = pathlib.Path('scripts/captions_runtime.py').read_text(encoding='utf-8')
-          for needle in ('"--skip-download"', '"--no-cookies"', 'comment_sort=top', 'max_comments={limit},{limit},0,0,0'):
+          for needle in ('"--skip-download"', '"--no-cookies"', 'comment_sort=top', 'max_comments={limit},{limit},0,0,1'):
               assert needle in engine
           assert 'if __name__ == "__main__"' not in engine
           assert '"--no-warnings"' not in engine
 
           channel = pathlib.Path('scripts/channel_runtime.py').read_text(encoding='utf-8')
-          for needle in ('"--playlist-end", str(max_videos)', 'upload_date.startswith("2026")', 'load_top_comments', 'channel-corpus.zip'):
+          for needle in ('"--playlist-end"', 'str(max_videos)', 'upload_date.startswith("2026")', 'load_top_comments', '"metadata_failures"', '"partial_reasons"', '"unresolved"', 'channel-corpus.zip'):
               assert needle in channel
+
+          cache = pathlib.Path('scripts/cache_runtime.py').read_text(encoding='utf-8')
+          assert '"scope": "current_run"' in cache
+          assert 'entries: list[tuple[str, str]]' in cache
+
+          validator = pathlib.Path('scripts/validate_result.py').read_text(encoding='utf-8')
+          assert 'processed-index must contain exactly the current run video ids' in validator
+          assert 'incomplete corpus may not report status ok' in validator
 
           workflow = pathlib.Path('.github/workflows/transcribe.yml').read_text(encoding='utf-8')
           assert 'branches: [runtime-requests]' in workflow
@@ -105,6 +113,9 @@ jobs:
           assert 'python3 scripts/captions_runtime.py' not in workflow
           assert 'Verify dedicated runner boundary' in workflow
           assert 'Attest result checksum receipt' in workflow
+          assert 'runtime_sha: ${{ steps.runtime_sha.outputs.sha }}' in workflow
+          assert 'ref: ${{ needs.resolve.outputs.runtime_sha }}' in workflow
+          assert 'test "$actual" = "$EXPECTED_RUNTIME_SHA"' in workflow
           assert 'workflow_dispatch:' not in workflow
           assert 'workflow_call:' not in workflow
 
@@ -116,8 +127,8 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/install_tools.sh
-          test "$(tools/bin/yt-dlp --version)" = '2026.08.20.234504'
-          test "$(tools/bin/deno --version | head -n 1 | awk '{print $2}')" = '2.9.5'
+          test "$(tools/bin/yt-dlp --version)" = '2026.09.16.232951'
+          test "$(tools/bin/deno --version | head -n 1 | awk '{print $2}')" = '2.9.7'
 
       - name: Create deterministic CI provenance receipt
         shell: bash

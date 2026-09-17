@@ -53,7 +53,7 @@ def load_metadata(url: str) -> dict:
 
 
 def load_top_comments(url: str, limit: int = 7) -> tuple[list[dict], str]:
-    args = f"youtube:skip=translated_subs;comment_sort=top;max_comments={limit},{limit},0,0,0"
+    args = f"youtube:skip=translated_subs;comment_sort=top;max_comments={limit},{limit},0,0,1"
     completed = run([*yt_video_base(args), "--write-comments", "--dump-single-json", url], timeout=300)
     if completed.returncode != 0 or not completed.stdout.strip():
         return [], classify_failure(completed.stderr[-2000:])
@@ -71,11 +71,15 @@ def load_top_comments(url: str, limit: int = 7) -> tuple[list[dict], str]:
         text = str(item.get("text") or "").strip()
         if not text:
             continue
+        try:
+            like_count = int(item.get("like_count") or 0)
+        except (TypeError, ValueError):
+            like_count = 0
         out.append({
             "id": str(item.get("id") or ""),
             "author": str(item.get("author") or ""),
             "text": text,
-            "like_count": int(item.get("like_count") or 0),
+            "like_count": like_count,
             "timestamp": item.get("timestamp"),
             "is_pinned": bool(item.get("is_pinned")),
             "author_is_uploader": bool(item.get("author_is_uploader")),

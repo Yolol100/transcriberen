@@ -55,7 +55,7 @@ class CommentTests(unittest.TestCase):
         self.assertEqual(len(comments), 7)
         joined = " ".join(calls[0])
         self.assertIn("comment_sort=top", joined)
-        self.assertIn("max_comments=7,7,0,0,0", joined)
+        self.assertIn("max_comments=7,7,0,0,1", joined)
         self.assertIn("--write-comments", calls[0])
 
     def test_replies_are_filtered(self):

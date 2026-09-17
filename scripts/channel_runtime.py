@@ -13,6 +13,25 @@ import captions_runtime as captions
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
 VIDEOS = RESULTS / "videos"
+POLICY = {
+    "year": 2026,
+    "max_videos": 1000,
+    "comments_per_video": 7,
+    "comment_sort": "top",
+    "include_replies": False,
+}
+COUNT_KEYS = (
+    "discovered",
+    "checked",
+    "matched_2026",
+    "metadata_failures",
+    "captions_ok",
+    "no_captions",
+    "caption_failures",
+    "comments_ok",
+    "comments_unavailable",
+    "cache_hits",
+)
 
 
 def write_json(path: Path, value: object) -> None:
@@ -21,7 +40,19 @@ def write_json(path: Path, value: object) -> None:
 
 
 def discover_channel(channel_url: str, max_videos: int) -> tuple[dict, list[str]]:
-    command = [str(captions.BIN / "yt-dlp"), "--no-config", "--no-cookies", "--skip-download", "--flat-playlist", "--playlist-end", str(max_videos), "--extractor-args", "youtube:skip=translated_subs", "--dump-single-json", channel_url]
+    command = [
+        str(captions.BIN / "yt-dlp"),
+        "--no-config",
+        "--no-cookies",
+        "--skip-download",
+        "--flat-playlist",
+        "--playlist-end",
+        str(max_videos),
+        "--extractor-args",
+        "youtube:skip=translated_subs",
+        "--dump-single-json",
+        channel_url,
+    ]
     completed = captions.run(command, timeout=300)
     diagnostic = completed.stderr[-2000:]
     if diagnostic and captions.classify_failure(diagnostic) == "access_blocked":
@@ -29,7 +60,10 @@ def discover_channel(channel_url: str, max_videos: int) -> tuple[dict, list[str]
     if completed.returncode != 0 or not completed.stdout.strip():
         detail = diagnostic or "yt-dlp returned no channel listing"
         raise RuntimeError(f"{captions.classify_failure(detail)}::{detail}")
-    data = json.loads(completed.stdout)
+    try:
+        data = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"error::yt-dlp returned invalid channel JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise RuntimeError("error::invalid channel metadata")
     ids = []
@@ -41,7 +75,11 @@ def discover_channel(channel_url: str, max_videos: int) -> tuple[dict, list[str]
             ids.append(video_id)
         if len(ids) >= max_videos:
             break
-    channel = {"id": data.get("channel_id") or data.get("uploader_id") or data.get("id"), "title": data.get("channel") or data.get("uploader") or data.get("title"), "url": channel_url}
+    channel = {
+        "id": data.get("channel_id") or data.get("uploader_id") or data.get("id"),
+        "title": data.get("channel") or data.get("uploader") or data.get("title"),
+        "url": channel_url,
+    }
     return channel, ids
 
 
@@ -49,6 +87,20 @@ def clean_results() -> None:
     if RESULTS.exists():
         shutil.rmtree(RESULTS)
     VIDEOS.mkdir(parents=True, exist_ok=True)
+
+
+def empty_counts(discovered: int = 0) -> dict[str, int]:
+    counts = {key: 0 for key in COUNT_KEYS}
+    counts["discovered"] = discovered
+    return counts
+
+
+def failure_parts(exc: Exception) -> tuple[str, str]:
+    raw = str(exc)
+    status, separator, detail = raw.partition("::")
+    if not separator or status not in {"access_blocked", "error"}:
+        return "error", raw
+    return status, detail
 
 
 def build_zip() -> None:
@@ -64,32 +116,78 @@ def build_zip() -> None:
             zf.writestr(info, path.read_bytes())
 
 
+def write_failed_discovery(request: dict, provenance: dict, progress: dict, exc: Exception) -> None:
+    status, detail = failure_parts(exc)
+    counts = empty_counts()
+    result = {
+        "schema_version": "3.0",
+        "request_id": request["request_id"],
+        "status": status,
+        "source": {"type": "channel", "url": request["url"]},
+        "policy": POLICY,
+        "counts": counts,
+        "runtime_provenance": provenance,
+        "media_downloaded": False,
+        "error": detail[-2000:],
+    }
+    manifest = {
+        "schema_version": "1.1",
+        "request_id": request["request_id"],
+        "channel": {"id": None, "title": None, "url": request["url"]},
+        "policy": POLICY,
+        "counts": counts,
+        "partial_reasons": [],
+        "unresolved": [],
+        "items": [],
+    }
+    write_json(RESULTS / "result.json", result)
+    write_json(RESULTS / "manifest.json", manifest)
+    write_json(RESULTS / "processed-index.json", {
+        "schema_version": "2.0",
+        "scope": "current_run",
+        "generated_at": cache.utc_now(),
+        "requested_entries": 0,
+        "unique_videos": 0,
+        "processed_entries": 0,
+        "captions_done": 0,
+        "status_counts": {},
+        "items": [],
+    })
+    progress.update({"state": "failed"})
+    write_json(RESULTS / "progress.json", progress)
+    build_zip()
+    print(json.dumps({"request_id": request["request_id"], "status": status}))
+
+
 def main() -> None:
     request_file = Path(os.environ.get("REQUEST_FILE", "resolved-request.json"))
     request = json.loads(request_file.read_text(encoding="utf-8"))
     clean_results()
     provenance = captions.runtime_provenance()
-    progress = {"schema_version": "1.0", "request_id": request["request_id"], "state": "running", "discovered": 0, "checked": 0, "matched_2026": 0, "completed": 0}
+    progress = {
+        "schema_version": "1.1",
+        "request_id": request["request_id"],
+        "state": "running",
+        "discovered": 0,
+        "checked": 0,
+        "matched_2026": 0,
+        "completed": 0,
+        "unresolved": 0,
+    }
     write_json(RESULTS / "progress.json", progress)
     try:
         channel, video_ids = discover_channel(request["url"], int(request["max_videos"]))
     except Exception as exc:
-        raw = str(exc)
-        status, _, detail = raw.partition("::")
-        if status not in {"access_blocked", "error"}:
-            status, detail = "error", raw
-        result = {"schema_version": "3.0", "request_id": request["request_id"], "status": status, "source": {"type": "channel", "url": request["url"]}, "policy": {"year": 2026, "max_videos": 1000, "comments_per_video": 7, "comment_sort": "top", "include_replies": False}, "counts": {}, "runtime_provenance": provenance, "media_downloaded": False, "error": detail[-2000:]}
-        write_json(RESULTS / "result.json", result)
-        write_json(RESULTS / "manifest.json", {"schema_version": "1.0", "items": []})
-        progress.update({"state": "failed"})
-        write_json(RESULTS / "progress.json", progress)
-        build_zip()
-        print(json.dumps({"request_id": request["request_id"], "status": status}))
+        write_failed_discovery(request, provenance, progress, exc)
         return
+
     progress["discovered"] = len(video_ids)
     write_json(RESULTS / "progress.json", progress)
     items = []
-    counts = {"discovered": len(video_ids), "checked": 0, "matched_2026": 0, "captions_ok": 0, "no_captions": 0, "caption_failures": 0, "comments_ok": 0, "comments_unavailable": 0, "cache_hits": 0}
+    unresolved = []
+    index_entries: list[tuple[str, str]] = []
+    counts = empty_counts(len(video_ids))
+
     with cache.connect() as conn:
         for video_id in video_ids:
             counts["checked"] += 1
@@ -97,13 +195,37 @@ def main() -> None:
             url = f"https://www.youtube.com/watch?v={video_id}"
             try:
                 meta = captions.load_metadata(url)
-            except Exception:
+            except Exception as exc:
+                status, detail = failure_parts(exc)
+                counts["metadata_failures"] += 1
+                unresolved.append({
+                    "video_id": video_id,
+                    "url": url,
+                    "status": status,
+                    "reason": "metadata_acquisition_failed",
+                    "error": detail[-2000:],
+                })
+                progress["unresolved"] = len(unresolved)
                 write_json(RESULTS / "progress.json", progress)
                 continue
+
             upload_date = str(meta.get("upload_date") or "")
+            if not upload_date:
+                counts["metadata_failures"] += 1
+                unresolved.append({
+                    "video_id": video_id,
+                    "url": url,
+                    "status": "error",
+                    "reason": "missing_upload_date",
+                    "error": "video metadata did not contain upload_date; 2026 membership cannot be proven",
+                })
+                progress["unresolved"] = len(unresolved)
+                write_json(RESULTS / "progress.json", progress)
+                continue
             if not upload_date.startswith("2026"):
                 write_json(RESULTS / "progress.json", progress)
                 continue
+
             counts["matched_2026"] += 1
             progress["matched_2026"] = counts["matched_2026"]
             title = str(meta.get("title") or video_id)
@@ -113,6 +235,8 @@ def main() -> None:
             caption_meta = None
             transcript_sha = None
             cache_hit = False
+            index_entries.append((video_id, request["language"]))
+
             cached = cache.get_cached_transcript(conn, video_id, request["language"])
             if cached:
                 transcript = cached["text"]
@@ -130,42 +254,138 @@ def main() -> None:
                         transcript_sha = captions.sha256_text(transcript)
                         transcript_status = "ok"
                         (video_dir / "transcript.txt").write_text(transcript, encoding="utf-8")
-                        cache.store_result(conn, video_id=video_id, language=request["language"], url=url, status="ok", caption=caption_meta, transcript=transcript, upload_date=upload_date, title=title)
+                        cache.store_result(
+                            conn,
+                            video_id=video_id,
+                            language=request["language"],
+                            url=url,
+                            status="ok",
+                            caption=caption_meta,
+                            transcript=transcript,
+                            upload_date=upload_date,
+                            title=title,
+                        )
                     except Exception as exc:
-                        raw = str(exc)
-                        transcript_status = raw.split("::", 1)[0] if "::" in raw else "error"
-                        if transcript_status not in {"access_blocked", "error"}:
-                            transcript_status = "error"
-                        cache.store_result(conn, video_id=video_id, language=request["language"], url=url, status=transcript_status, caption=None, transcript=None, upload_date=upload_date, title=title)
+                        transcript_status, _ = failure_parts(exc)
+                        cache.store_result(
+                            conn,
+                            video_id=video_id,
+                            language=request["language"],
+                            url=url,
+                            status=transcript_status,
+                            caption=None,
+                            transcript=None,
+                            upload_date=upload_date,
+                            title=title,
+                        )
                 else:
-                    cache.store_result(conn, video_id=video_id, language=request["language"], url=url, status="skipped_no_captions", caption=None, transcript=None, upload_date=upload_date, title=title)
+                    cache.store_result(
+                        conn,
+                        video_id=video_id,
+                        language=request["language"],
+                        url=url,
+                        status="skipped_no_captions",
+                        caption=None,
+                        transcript=None,
+                        upload_date=upload_date,
+                        title=title,
+                    )
+
             if transcript_status == "ok":
                 counts["captions_ok"] += 1
             elif transcript_status == "skipped_no_captions":
                 counts["no_captions"] += 1
             else:
                 counts["caption_failures"] += 1
-            comments, comments_status = captions.load_top_comments(url, int(request["comments_per_video"]))
+
+            try:
+                comments, comments_status = captions.load_top_comments(
+                    url,
+                    int(request["comments_per_video"]),
+                )
+            except Exception as exc:
+                comments = []
+                comments_status, _ = failure_parts(exc)
             if comments_status == "ok":
                 counts["comments_ok"] += 1
             else:
                 counts["comments_unavailable"] += 1
-            write_json(video_dir / "comments.json", {"status": comments_status, "sort": "top", "include_replies": False, "count": len(comments), "comments": comments})
-            metadata = {"video_id": video_id, "url": url, "title": title, "upload_date": upload_date, "transcript_status": transcript_status, "caption": caption_meta, "transcript_sha256": transcript_sha, "cache_hit": cache_hit, "comments_status": comments_status, "comments_count": len(comments)}
+            write_json(video_dir / "comments.json", {
+                "status": comments_status,
+                "sort": "top",
+                "include_replies": False,
+                "count": len(comments),
+                "comments": comments,
+            })
+            metadata = {
+                "video_id": video_id,
+                "url": url,
+                "title": title,
+                "upload_date": upload_date,
+                "transcript_status": transcript_status,
+                "caption": caption_meta,
+                "transcript_sha256": transcript_sha,
+                "cache_hit": cache_hit,
+                "comments_status": comments_status,
+                "comments_count": len(comments),
+            }
             write_json(video_dir / "metadata.json", metadata)
             items.append(metadata)
             progress["completed"] = len(items)
             write_json(RESULTS / "progress.json", progress)
-        cache.export_index(conn, RESULTS / "processed-index.json")
-    overall = "partial" if counts["caption_failures"] else "ok"
-    manifest = {"schema_version": "1.0", "request_id": request["request_id"], "channel": channel, "policy": {"year": 2026, "max_videos": 1000, "comments_per_video": 7, "comment_sort": "top", "include_replies": False}, "counts": counts, "items": items}
-    result = {"schema_version": "3.0", "request_id": request["request_id"], "status": overall, "source": {"type": "channel", **channel}, "policy": manifest["policy"], "counts": counts, "runtime_provenance": provenance, "media_downloaded": False}
+
+        cache.export_index(
+            conn,
+            RESULTS / "processed-index.json",
+            entries=index_entries,
+        )
+
+    partial_reasons = []
+    if counts["metadata_failures"]:
+        partial_reasons.append("metadata_failures")
+    if counts["caption_failures"]:
+        partial_reasons.append("caption_failures")
+    if counts["comments_unavailable"]:
+        partial_reasons.append("comments_unavailable")
+    overall = "partial" if partial_reasons else "ok"
+    manifest = {
+        "schema_version": "1.1",
+        "request_id": request["request_id"],
+        "channel": channel,
+        "policy": POLICY,
+        "counts": counts,
+        "partial_reasons": partial_reasons,
+        "unresolved": unresolved,
+        "items": items,
+    }
+    result = {
+        "schema_version": "3.0",
+        "request_id": request["request_id"],
+        "status": overall,
+        "source": {"type": "channel", **channel},
+        "policy": manifest["policy"],
+        "counts": counts,
+        "partial_reasons": partial_reasons,
+        "runtime_provenance": provenance,
+        "media_downloaded": False,
+    }
     write_json(RESULTS / "manifest.json", manifest)
-    progress.update({"state": "complete", "completed": len(items)})
+    progress.update({
+        "state": "complete",
+        "completed": len(items),
+        "unresolved": len(unresolved),
+    })
     write_json(RESULTS / "progress.json", progress)
     write_json(RESULTS / "result.json", result)
     build_zip()
-    print(json.dumps({"request_id": request["request_id"], "status": overall, "matched_2026": counts["matched_2026"], "captions_ok": counts["captions_ok"]}))
+    print(json.dumps({
+        "request_id": request["request_id"],
+        "status": overall,
+        "matched_2026": counts["matched_2026"],
+        "captions_ok": counts["captions_ok"],
+        "comments_ok": counts["comments_ok"],
+        "unresolved": len(unresolved),
+    }))
 
 
 if __name__ == "__main__":

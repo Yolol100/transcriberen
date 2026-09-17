@@ -46,15 +46,27 @@ class DoctorTests(unittest.TestCase):
         finally:
             td.cleanup()
 
-    def test_reply_limit_regression_is_detected(self):
+    def test_reply_depth_regression_is_detected(self):
         td, root = self.copied_tree()
         try:
             path = root / 'scripts' / 'captions_runtime.py'
-            text = path.read_text(encoding='utf-8').replace('max_comments={limit},{limit},0,0,0', 'max_comments={limit},{limit},7,7,1')
+            text = path.read_text(encoding='utf-8').replace('max_comments={limit},{limit},0,0,1', 'max_comments={limit},{limit},7,7,2')
             path.write_text(text, encoding='utf-8')
             result = m.run_checks(root)
             self.assertFalse(result['ok'])
-            self.assertTrue(any('comment parent/reply limits' in item for item in result['failures']))
+            self.assertTrue(any('comment no-reply depth limit' in item for item in result['failures']))
+        finally:
+            td.cleanup()
+
+    def test_current_run_index_regression_is_detected(self):
+        td, root = self.copied_tree()
+        try:
+            path = root / 'scripts' / 'cache_runtime.py'
+            text = path.read_text(encoding='utf-8').replace('"scope": "current_run"', '"scope": "all_history"')
+            path.write_text(text, encoding='utf-8')
+            result = m.run_checks(root)
+            self.assertFalse(result['ok'])
+            self.assertTrue(any('processed index is not scoped' in item for item in result['failures']))
         finally:
             td.cleanup()
 
