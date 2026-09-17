@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import hashlib
 import json
-import re
 import sys
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
-VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
-LANG_TAG_RE = re.compile(r"^[A-Za-z]{2,3}(?:[-.][A-Za-z0-9]{2,16})*$")
-ALLOWED_STATUSES = {"ok", "skipped_no_captions", "access_blocked", "error"}
 MEDIA_EXTENSIONS = {".mp4", ".webm", ".mkv", ".mov", ".avi", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac"}
+FIXED_POLICY = {"year": 2026, "max_videos": 1000, "comments_per_video": 7, "comment_sort": "top", "include_replies": False}
 
 
 def expected_tool_versions() -> dict[str, str]:
@@ -22,110 +19,92 @@ def expected_tool_versions() -> dict[str, str]:
 
 def validate(path: Path) -> None:
     data = json.loads(path.read_text(encoding="utf-8"))
-    if data.get("schema_version") != "2.1":
-        raise ValueError("result schema_version must be 2.1")
-    if data.get("status") not in ALLOWED_STATUSES:
+    if data.get("schema_version") != "3.0":
+        raise ValueError("result schema_version must be 3.0")
+    if data.get("status") not in {"ok", "partial", "access_blocked", "error"}:
         raise ValueError("invalid result status")
-    if data.get("cache_hit") not in {None, True, False}:
-        raise ValueError("cache_hit must be boolean when present")
-
     source = data.get("source") or {}
-    source_type = source.get("type")
-    if source_type not in {"video", "short"}:
-        raise ValueError("source.type must be video or short")
-    video_id = str(source.get("video_id") or "")
-    if not VIDEO_ID_RE.fullmatch(video_id):
-        raise ValueError("invalid source.video_id")
-    expected_url = (
-        f"https://www.youtube.com/watch?v={video_id}"
-        if source_type == "video"
-        else f"https://www.youtube.com/shorts/{video_id}"
-    )
-    if source.get("url") != expected_url:
-        raise ValueError("source.url must exactly match normalized source type and video id")
-    if "source_context" in data or "project_id" in data or "source_set_version" in data:
-        raise ValueError("project truth must not be embedded in runtime results")
+    if source.get("type") != "channel" or not str(source.get("url") or "").endswith("/videos"):
+        raise ValueError("source must be a normalized YouTube channel /videos URL")
+    if data.get("policy") != FIXED_POLICY:
+        raise ValueError("fixed channel policy mismatch")
     if data.get("media_downloaded") is not False:
         raise ValueError("media_downloaded must be false")
+    if any(key in data for key in ("project_id", "source_set_version", "owner_skill")):
+        raise ValueError("project truth must not be embedded in runtime results")
 
     provenance = data.get("runtime_provenance")
     if not isinstance(provenance, dict):
         raise ValueError("runtime_provenance is required")
-    execution_target = str(provenance.get("execution_target") or "")
-    if execution_target not in {"self-hosted", "local", "test"}:
+    target = str(provenance.get("execution_target") or "")
+    if target not in {"self-hosted", "local", "test"}:
         raise ValueError("invalid runtime_provenance.execution_target")
-    if execution_target != "test":
+    if target != "test":
         versions = expected_tool_versions()
         if provenance.get("yt_dlp_version") != versions.get("yt-dlp"):
             raise ValueError("runtime yt-dlp version does not match capability contract")
         if provenance.get("deno_version") != versions.get("deno-ejs-runtime"):
             raise ValueError("runtime Deno version does not match capability contract")
 
-    transcript_path = RESULTS / "transcript.txt"
-    status = data["status"]
-    if status == "ok":
-        caption = data.get("caption")
-        if not isinstance(caption, dict):
-            raise ValueError("ok result requires caption metadata")
-        if caption.get("kind") not in {"manual", "automatic"}:
-            raise ValueError("invalid caption.kind")
-        if not LANG_TAG_RE.fullmatch(str(caption.get("language") or "")):
-            raise ValueError("invalid caption.language")
-        if caption.get("format") not in {"vtt", "srt"}:
-            raise ValueError("caption.format must be vtt or srt")
-        cue_count = caption.get("cue_count")
-        if isinstance(cue_count, bool) or not isinstance(cue_count, int) or cue_count <= 0:
-            raise ValueError("caption cue_count must be a positive integer")
-        if not transcript_path.is_file():
-            raise ValueError("ok result requires transcript.txt")
-        transcript = transcript_path.read_text(encoding="utf-8")
-        if not transcript.strip():
-            raise ValueError("transcript.txt must not be empty")
-        digest = hashlib.sha256(transcript.encode("utf-8")).hexdigest()
-        if data.get("transcript_sha256") != digest:
-            raise ValueError("transcript_sha256 mismatch")
-        if data.get("transcript_chars") != len(transcript):
-            raise ValueError("transcript_chars mismatch")
-        if data.get("error"):
-            raise ValueError("ok result may not contain error")
-    else:
-        if transcript_path.exists():
-            raise ValueError("non-ok result may not contain transcript.txt")
-        if data.get("caption") is not None:
-            raise ValueError("non-ok result must have caption=null")
-        if data.get("transcript_sha256") is not None or data.get("transcript_chars") != 0:
-            raise ValueError("non-ok result must not claim transcript content")
-        if status == "skipped_no_captions" and data.get("error"):
-            raise ValueError("skipped_no_captions may not contain error")
-        if status in {"access_blocked", "error"} and not str(data.get("error") or "").strip():
-            raise ValueError("failed result requires error detail")
-
+    manifest_path = RESULTS / "manifest.json"
+    progress_path = RESULTS / "progress.json"
     index_path = RESULTS / "processed-index.json"
+    for required in (manifest_path, progress_path):
+        if not required.is_file():
+            raise ValueError(f"missing required output: {required.name}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("policy") != FIXED_POLICY:
+        raise ValueError("manifest policy mismatch")
+    items = manifest.get("items") or []
+    if not isinstance(items, list) or len(items) > 1000:
+        raise ValueError("manifest items must contain at most 1000 videos")
+    counts = manifest.get("counts") or {}
+    if int(counts.get("discovered") or 0) > 1000:
+        raise ValueError("discovered count exceeds 1000")
+
+    for item in items:
+        video_id = str(item.get("video_id") or "")
+        if len(video_id) != 11:
+            raise ValueError("invalid video id")
+        if not str(item.get("upload_date") or "").startswith("2026"):
+            raise ValueError("manifest contains a video outside 2026")
+        video_dir = RESULTS / "videos" / video_id
+        comments = json.loads((video_dir / "comments.json").read_text(encoding="utf-8"))
+        if comments.get("sort") != "top" or comments.get("include_replies") is not False:
+            raise ValueError("comments policy mismatch")
+        if int(comments.get("count") or 0) > 7 or len(comments.get("comments") or []) > 7:
+            raise ValueError("more than 7 comments stored")
+        for comment in comments.get("comments") or []:
+            if not str(comment.get("text") or "").strip():
+                raise ValueError("empty comment stored")
+        if item.get("transcript_status") == "ok" and not (video_dir / "transcript.txt").is_file():
+            raise ValueError("ok transcript item missing transcript.txt")
+
     if index_path.exists():
         index = json.loads(index_path.read_text(encoding="utf-8"))
-        if index.get("schema_version") != "1.0":
-            raise ValueError("processed-index schema_version must be 1.0")
-        for key in ("unique_videos", "processed_entries", "captions_done"):
-            value = index.get(key)
-            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                raise ValueError(f"processed-index {key} must be a non-negative integer")
-        if not isinstance(index.get("items"), list):
-            raise ValueError("processed-index items must be a list")
+        if index.get("schema_version") != "2.0":
+            raise ValueError("processed-index schema_version must be 2.0")
 
-    allowed_files = {"result.json", "transcript.txt", "processed-index.json", "SHA256SUMS.txt"}
+    archive = RESULTS / "channel-corpus.zip"
+    if not archive.is_file():
+        raise ValueError("channel-corpus.zip missing")
+    with zipfile.ZipFile(archive) as zf:
+        names = set(zf.namelist())
+        for required in ("manifest.json", "result.json", "progress.json"):
+            if required not in names:
+                raise ValueError(f"zip missing {required}")
+        if any(name.startswith("../") or "/../" in name for name in names):
+            raise ValueError("unsafe path in ZIP")
+
     for item in RESULTS.rglob("*"):
-        if item.is_dir():
-            continue
-        if item.suffix.lower() in MEDIA_EXTENSIONS:
+        if item.is_file() and item.suffix.lower() in MEDIA_EXTENSIONS:
             raise ValueError(f"media artifact forbidden: {item.name}")
-        if item.relative_to(RESULTS).as_posix() not in allowed_files:
-            raise ValueError(f"unexpected result artifact: {item.relative_to(RESULTS)}")
 
 
 def main() -> None:
     target = Path(sys.argv[1] if len(sys.argv) > 1 else RESULTS / "result.json")
     validate(target)
-    print("result-contract: OK")
+    print("channel-result-contract: OK")
 
 
 if __name__ == "__main__":

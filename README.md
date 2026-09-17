@@ -2,53 +2,66 @@
 
 > **Portfoliostatus:** Actief ondersteunend · Webactueel transcriptieruntime
 
-**Rol in het platform:** deze runtime levert één begrensde transcriptietaak aan de Webactueel-workflow. Requests gebruiken de eigen append-only `runtime-requests`-queue; [Orchestrator](https://github.com/Yolol100/Orchestrator) maakt hiervoor geen nieuwe runtimebranch en inhoudelijke acceptatie blijft bij de owning workflow.
+**Rol:** publieke YouTube-kanaalcaptions en begrensde commentcontext verzamelen als evidence/discovery-input. Inhoudelijke acceptatie en promotie naar Skills/projectbronnen blijft buiten deze repository.
 
-Deze repository heeft één taak:
+Deze repository heeft nu één publieke acquisitietaak:
 
-**publieke YouTube-video of Short -> één echte ondertiteltrack -> platte transcripttekst.**
+**YouTube-kanaal -> `/videos` -> maximaal 1000 entries -> alleen uploadjaar 2026 -> publieke captiontekst + maximaal 7 top-level comments per video -> gevalideerd corpus + ZIP.**
 
-Als een video of Short geen ondertiteling heeft, is dat geen fout. De run eindigt met `skipped_no_captions` en maakt geen `transcript.txt`.
+De oude directe single-video/Short-ingang bestaat niet meer.
 
 ## Ondersteund
 
-- `https://www.youtube.com/watch?v=<id>`
-- `https://www.youtube.com/shorts/<id>`
-- `https://youtu.be/<id>`
-- optionele taal via `language`; standaard `auto`
-- één geselecteerde captiontrack
-- lokale of dedicated self-hosted uitvoering via een normale directe internetverbinding
+- `https://www.youtube.com/@handle`
+- `https://www.youtube.com/@handle/videos`
+- `https://www.youtube.com/channel/<id>`
+- legacy `/c/` en `/user/` kanaalvormen
+- optionele captiontaal via `language`; standaard `auto`
+- maximaal 1000 entries van de `/videos`-tab
+- alleen video’s met exacte `upload_date` in 2026
+- één gekozen publieke captiontrack per video
+- maximaal 7 YouTube-side `top` gesorteerde top-level comments per video
+- manifest, voortgang, cache-index, checksums en deterministische ZIP
 
-Captionkeuze bij `language=auto`: Engels, daarna Nederlands, daarna de eerste andere beschikbare echte taal. Binnen dezelfde taal wint handmatige ondertiteling van automatisch gegenereerde ondertiteling. Bij een expliciete taalcode, bijvoorbeeld `en-US`, wordt eerst die exacte code gezocht; pas daarna wordt naar dezelfde taalfamilie teruggevallen. Automatisch vertaalde tracks worden uitgesloten.
+Captionkeuze bij `language=auto`: Engels, daarna Nederlands, daarna de eerste andere bruikbare taal. Binnen dezelfde taal wint handmatige ondertiteling van automatisch gegenereerde ondertiteling. Automatisch vertaalde tracks worden uitgesloten.
 
 ## Niet ondersteund
 
-De runtime doet bewust niet aan comments, kanaal- of playlistverzameling, YouTube search, ranking, topicfilters, likes/views/engagement, knowledge handoffs, artikelen, feeds, sitemaps, audio-extractie, FFmpeg, Whisper of video/audio-download.
-
-Ook worden geen cookies, login, browserprofielen, proxies, PO-tokens of CAPTCHA-bypasses gebruikt.
+- directe video-, Short- of playlistinput
+- `/shorts`- of livestreamtab als aparte bron
+- YouTube search, ranking of topicfilters
+- comment replies
+- likes/views/engagement als selectiemechanisme
+- audio-extractie, FFmpeg of Whisper
+- video- of audiodownload
+- cookies, login, browserprofielen, proxies, PO-tokens of CAPTCHA-bypass
 
 ## Waarom self-hosted
 
-GitHub-hosted cloud-IP's kunnen van YouTube `Sign in to confirm you're not a bot` krijgen. Dat is geen captionlogica die betrouwbaar kan worden weggeprogrammeerd. Daarom valideert de GitHub-hosted `resolve`-job alleen het immutable queue-request; de daadwerkelijke YouTube-captionextractie draait op de dedicated runner:
+GitHub-hosted cloud-IP’s kunnen door YouTube worden geblokkeerd. Daarom valideert de GitHub-hosted `resolve`-job alleen het append-only queue-request; echte YouTube-acquisitie draait op:
 
 `[self-hosted, linux, x64, webactueel-transcribe]`
 
-Na succesvolle requestvalidatie publiceert de hosted job direct een `pending` commitstatus. Daardoor blijft zichtbaar dat een request correct is geaccepteerd, ook wanneer de self-hosted runner offline is of nog in de wachtrij staat. De self-hosted job vervangt die status na uitvoering door `success`, `failure` of `error`.
-
-De runner gebruikt de normale netwerkverbinding van die host. Als YouTube ook daar toegang blokkeert, wordt dat eerlijk als `access_blocked` gerapporteerd. Warnings van yt-dlp worden niet onderdrukt, zodat een anti-botmelding niet stil als `skipped_no_captions` kan worden geïnterpreteerd.
+Na requestvalidatie wordt `pending` gepubliceerd. De self-hosted job vervangt dit na uitvoering door het echte resultaat. Als YouTube ook de normale verbinding van de dedicated host blokkeert, blijft dat zichtbaar als `access_blocked`; de runtime omzeilt dit niet.
 
 ## Request
 
 ```json
 {
   "enabled": true,
-  "request_id": "example-video-001",
-  "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  "request_id": "brian-coords-2026",
+  "url": "https://www.youtube.com/@BrianCoords",
   "language": "auto"
 }
 ```
 
-Alle andere requestvelden worden geweigerd. Daarmee kan oude comments/search/ranking-configuratie niet stil terugkomen.
+Andere requestvelden worden fail-closed geweigerd. Jaar, videolimiet en commentbeleid zijn bewust geen vrij instelbare requestvelden:
+
+- `year = 2026`
+- `max_videos = 1000`
+- `comments_per_video = 7`
+- `comment_sort = top`
+- replies = uit
 
 ## Queue
 
@@ -56,74 +69,57 @@ Operationele requests worden append-only toegevoegd op branch `runtime-requests`
 
 `requests/queue/<request_id>.json`
 
-De bestandsnaam moet exact gelijk zijn aan `request_id`. De queuecommit mag precies één nieuw requestbestand toevoegen en niets anders. De self-hosted runner voert nooit code vanaf de transportbranch uit; hij checkt uitsluitend `Yolol100/transcriberen@main` uit.
+De bestandsnaam moet exact gelijk zijn aan `request_id`. De transportcommit mag precies één nieuw requestbestand toevoegen. De self-hosted runner voert nooit code vanaf de transportbranch uit; hij checkt uitsluitend `Yolol100/transcriberen@main` uit.
 
-## Snelle herkenning en cache
+## Cache en hervatten
 
-Succesvolle transcripties worden op de trusted execution host persistent bijgehouden in een lokale SQLite-index. De sleutel is `video_id + requested_language`.
+Gevalideerde captions worden op de trusted execution host gecachet op `video_id + requested_language`. De transcript-SHA en lengte worden vóór hergebruik gecontroleerd; corrupte cachedata wordt verwijderd en opnieuw opgehaald.
 
-Bij iedere nieuwe request gebeurt eerst een cachecontrole:
+Comments worden niet persistent als waarheid gecachet. Iedere nieuwe kanaalrun mag daardoor opnieuw de actuele YouTube-side topselectie proberen op te halen.
 
-- bestaat dezelfde video + taal al met een gevalideerd succesvol transcript, dan wordt dat transcript direct hergebruikt en wordt YouTube niet opnieuw bevraagd;
-- klopt de opgeslagen transcript-SHA of lengte niet meer, dan wordt de corrupte cache-entry verwijderd en vindt een normale nieuwe acquisitie plaats;
-- de persistente database blijft hoststate en wordt nooit naar `main` gecommit.
-
-Standaard staat de database in:
-
-`~/.local/share/webactueel-transcribe/history.sqlite3`
-
-Via `TRANSCRIBE_STATE_DIR` kan een andere state-directory worden gekozen.
-
-Iedere run exporteert daarnaast `results/processed-index.json`. Die bevat onder meer:
-
-- `unique_videos` — aantal unieke video-ID's;
-- `processed_entries` — aantal unieke video/taal-combinaties;
-- `captions_done` — aantal entries met een succesvol transcript;
-- `status_counts` — aantallen per runtime-status;
-- `items` — alle bekende video-ID's met status, taal, captionmetadata, hashes en verwerkingstijdstippen.
-
-Transcripttekst zelf staat niet in `processed-index.json`.
+De SQLite-database blijft hoststate en wordt nooit naar `main` gecommit. `processed-index.json` bevat alleen technische readback/provenance en geen volledige transcripttekst.
 
 ## Output
 
-Iedere run maakt:
+Per gematchte 2026-video:
+
+- `videos/<video_id>/metadata.json`
+- `videos/<video_id>/transcript.txt` alleen wanneer captions bestaan
+- `videos/<video_id>/comments.json` met maximaal 7 top-level comments
+
+Per run:
 
 - `results/result.json`
+- `results/manifest.json`
+- `results/progress.json`
 - `results/processed-index.json`
+- `results/channel-corpus.zip`
 - `results/SHA256SUMS.txt`
-- `results/transcript.txt` alleen bij status `ok`
 
-`result.json` bevat bij de cache-route ook `cache_hit: true`; bij een verse acquisitie wordt `cache_hit: false` vastgelegd.
-
-Mogelijke statussen:
-
-- `ok` — ondertiteling opgehaald of uit de gevalideerde lokale cache hergebruikt en genormaliseerd;
-- `skipped_no_captions` — bron heeft aantoonbaar geen bruikbare captiontrack; bewust overgeslagen;
-- `access_blocked` — YouTube blokkeert de acquisitieverbinding;
-- `error` — andere extractie- of validatiefout.
-
-Ruwe yt-dlp-metadata wordt niet opgeslagen. Media wordt nooit gedownload. Resultaten leggen de werkelijk gebruikte yt-dlp- en Deno-versies vast; de validator weigert toolversiedrift.
+Een video zonder captions blijft zichtbaar als `skipped_no_captions`; comments kunnen dan nog steeds worden opgeslagen. Commentfalen is non-gating voor een geldig transcript en krijgt een eigen status.
 
 ## Toolchain
 
-De capability is gepind op:
+De bestaande gepinde toolchain blijft behouden:
 
-- yt-dlp nightly `2026.08.20.234504`;
-- Deno `2.9.5`.
+- yt-dlp nightly `2026.08.20.234504`
+- Deno `2.9.5`
 
-`scripts/install_tools.sh` accepteert een reeds aanwezige exact passende binary. Als die ontbreekt of een andere versie heeft, haalt het script uitsluitend de gepinde GitHub-release op en controleert de vastgelegde SHA-256 vóór installatie. yt-dlp wordt daarna altijd via een lokale wrapper gestart met Deno expliciet als `--js-runtimes` runtime.
+`scripts/install_tools.sh` accepteert alleen de exacte versie of downloadt de vastgelegde release en controleert SHA-256 vóór installatie. yt-dlp draait altijd via de lokale wrapper met Deno expliciet als JS-runtime.
 
 ## Lokaal uitvoeren
 
-Vereisten: Linux x86_64 of WSL2/Ubuntu, Python 3.12+, `curl` en GNU `sha256sum`. yt-dlp en Deno hoeven niet vooraf geïnstalleerd te zijn; de bootstrap regelt de exact gepinde versies wanneer nodig.
+Vereisten: Linux x86_64 of WSL2/Ubuntu, Python 3.12+, `curl` en GNU `sha256sum`.
 
 ```bash
 bash scripts/run_local.sh requests/transcribe.json
 ```
 
-De lokale route gebruikt dezelfde resolver, toolbootstrap, cachecontrole, captionruntime, history-export en resultaatvalidator als de self-hosted GitHub Actions-route. Na afloop worden ook `cache_hit`, `captions_done` en `processed_entries` getoond.
+De lokale route gebruikt dezelfde resolver, toolbootstrap, channel runtime, cache en resultaatvalidator als de self-hosted route.
 
-Zie `docs/SELF-HOSTED-RUNNER.md` voor de dedicated runner.
+## Kennisgrens
+
+Transcripts en comments zijn evidence/discovery-input. Deze repo promoot niets automatisch naar project-, Skill-, Memory- of bronwaarheid. Dat blijft eigendom van de Webactueel-workflow en de juiste vakskill.
 
 ## Licentie
 

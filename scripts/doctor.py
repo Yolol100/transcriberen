@@ -10,6 +10,7 @@ REQUIRED = {
     "toolkit-contract.json",
     "scripts/resolve_request.py",
     "scripts/captions_runtime.py",
+    "scripts/channel_runtime.py",
     "scripts/cache_runtime.py",
     "scripts/validate_result.py",
     "scripts/install_tools.sh",
@@ -18,6 +19,7 @@ REQUIRED = {
     "README.md",
     "SECURITY.md",
     "THREAT-MODEL.md",
+    "AGENTS.md",
 }
 FORBIDDEN = {
     "scripts/runtime.py",
@@ -34,23 +36,19 @@ FORBIDDEN = {
     "requirements.txt",
     "requirements.lock",
 }
-FORBIDDEN_RUNTIME_TERMS = {
-    "include_comments",
-    "comment_sort",
-    "knowledge_context",
-    "channel_all",
-    "channel_streams",
-    "include_keywords",
-    "whisper",
-    "ffmpeg",
-    "trafilatura",
-}
 PROJECT_TRUTH_KEYS = {"owner_skill", "owner_mode", "project_id", "source_set_version"}
 PROJECT_TRUTH_MARKERS = {"project-transcriberen", "2.2.0-captions-only"}
 YT_DLP_VERSION = "2026.08.20.234504"
 YT_DLP_SHA256 = "8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93"
 DENO_VERSION = "2.9.5"
 DENO_SHA256 = "8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530"
+FIXED_POLICY = {
+    "year": 2026,
+    "max_videos": 1000,
+    "comments_per_video": 7,
+    "comment_sort": "top",
+    "include_replies": False,
+}
 
 
 def run_checks(root: Path = ROOT) -> dict:
@@ -65,12 +63,16 @@ def run_checks(root: Path = ROOT) -> dict:
     contract_path = root / "toolkit-contract.json"
     if contract_path.is_file():
         contract = json.loads(contract_path.read_text(encoding="utf-8"))
-        if contract.get("schema_version") != "2.1":
-            failures.append("toolkit schema_version must be 2.1")
-        if contract.get("capability_id") != "public-youtube-caption-acquisition":
+        if contract.get("schema_version") != "3.0":
+            failures.append("toolkit schema_version must be 3.0")
+        if contract.get("capability_id") != "public-youtube-channel-caption-corpus":
             failures.append("toolkit capability_id mismatch")
         if contract.get("runtime_target") != "self-hosted-or-local-direct-network":
             failures.append("runtime target must be self-hosted/local direct network")
+        if contract.get("inputs") != ["youtube-channel-url", "optional-language"]:
+            failures.append("toolkit must expose only channel input plus optional language")
+        if contract.get("fixed_policy") != FIXED_POLICY:
+            failures.append("fixed channel policy mismatch")
         leaked_keys = sorted(PROJECT_TRUTH_KEYS.intersection(contract))
         if leaked_keys:
             failures.append("project truth keys in toolkit contract: " + ", ".join(leaked_keys))
@@ -87,6 +89,7 @@ def run_checks(root: Path = ROOT) -> dict:
         "toolkit-contract.json",
         "scripts/resolve_request.py",
         "scripts/captions_runtime.py",
+        "scripts/channel_runtime.py",
         "scripts/cache_runtime.py",
         "scripts/validate_result.py",
     )
@@ -99,27 +102,55 @@ def run_checks(root: Path = ROOT) -> dict:
             if marker in text:
                 failures.append(f"project truth marker {marker!r} remains in {relative}")
 
-    for relative in ("scripts/resolve_request.py", "scripts/captions_runtime.py", "scripts/cache_runtime.py", ".github/workflows/transcribe.yml"):
-        path = root / relative
-        if not path.is_file():
-            continue
-        text = path.read_text(encoding="utf-8").casefold()
-        for term in FORBIDDEN_RUNTIME_TERMS:
-            if term in text:
-                failures.append(f"obsolete runtime term {term!r} remains in {relative}")
+    resolver = root / "scripts/resolve_request.py"
+    if resolver.is_file():
+        text = resolver.read_text(encoding="utf-8")
+        for needle, message in (
+            ('ALLOWED_INPUT_KEYS = {"enabled", "request_id", "url", "language"}', "request contract changed unexpectedly"),
+            ('"source_type": "channel"', "resolver is not channel-only"),
+            ('"year": YEAR', "resolver does not bind year 2026"),
+            ('"max_videos": MAX_VIDEOS', "resolver does not bind max_videos"),
+            ('"comments_per_video": COMMENTS_PER_VIDEO', "resolver does not bind comment limit"),
+            ('"include_replies": False', "resolver does not disable replies"),
+        ):
+            if needle not in text:
+                failures.append(message)
 
-    runtime = root / "scripts/captions_runtime.py"
-    if runtime.is_file() and '"--no-warnings"' in runtime.read_text(encoding="utf-8"):
-        failures.append("yt-dlp warnings must remain visible for access-block classification")
+    engine = root / "scripts/captions_runtime.py"
+    if engine.is_file():
+        text = engine.read_text(encoding="utf-8")
+        for needle, message in (
+            ('"--skip-download"', "caption engine may download media"),
+            ('"--no-cookies"', "caption engine cookie boundary missing"),
+            ('comment_sort=top', "YouTube comment top-sort missing"),
+            ('max_comments={limit},{limit},0,0,0', "comment parent/reply limits missing"),
+        ):
+            if needle not in text:
+                failures.append(message)
+        if 'if __name__ == "__main__"' in text:
+            failures.append("caption engine must not remain a standalone single-video CLI")
+        if '"--no-warnings"' in text:
+            failures.append("yt-dlp warnings must remain visible for access-block classification")
+
+    channel = root / "scripts/channel_runtime.py"
+    if channel.is_file():
+        text = channel.read_text(encoding="utf-8")
+        for needle, message in (
+            ('"--playlist-end", str(max_videos)', "channel discovery is not bounded"),
+            ('upload_date.startswith("2026")', "exact 2026 filtering missing"),
+            ('load_top_comments', "per-video comments are not acquired"),
+            ('channel-corpus.zip', "channel ZIP output missing"),
+        ):
+            if needle not in text:
+                failures.append(message)
 
     cache = root / "scripts/cache_runtime.py"
     if cache.is_file():
         text = cache.read_text(encoding="utf-8")
         for needle, message in (
             ("history.sqlite3", "persistent cache database is not configured"),
-            ("processed-index.json", "processed index export is missing"),
             ("PRIMARY KEY (video_id, requested_language)", "cache does not deduplicate by video/language"),
-            ("cache_hit", "cache hit evidence is missing"),
+            ("transcript_sha256", "cache transcript-integrity evidence missing"),
         ):
             if needle not in text:
                 failures.append(message)
@@ -140,16 +171,20 @@ def run_checks(root: Path = ROOT) -> dict:
     workflow = root / ".github/workflows/transcribe.yml"
     if workflow.is_file():
         text = workflow.read_text(encoding="utf-8")
-        if "runs-on: [self-hosted, linux, x64, webactueel-transcribe]" not in text:
-            failures.append("transcribe workflow is not bound to dedicated self-hosted runner")
-        if "branches: [runtime-requests]" not in text:
-            failures.append("transcribe workflow must use runtime-requests branch")
-        if "--result pending" not in text:
-            failures.append("queue workflow does not publish pending self-hosted status")
-        if "python3 scripts/cache_runtime.py precheck" not in text:
-            failures.append("workflow does not precheck persistent cache")
-        if "python3 scripts/cache_runtime.py finalize" not in text:
-            failures.append("workflow does not persist/export cache history")
+        for needle, message in (
+            ("runs-on: [self-hosted, linux, x64, webactueel-transcribe]", "transcribe workflow is not bound to dedicated self-hosted runner"),
+            ("branches: [runtime-requests]", "transcribe workflow must use runtime-requests branch"),
+            ("python3 scripts/channel_runtime.py", "workflow does not run channel runtime"),
+            ("--result pending", "queue workflow does not publish pending self-hosted status"),
+            ("Verify dedicated runner boundary", "runner boundary verification was removed"),
+            ("Attest result checksum receipt", "result attestation was removed"),
+        ):
+            if needle not in text:
+                failures.append(message)
+        if "python3 scripts/captions_runtime.py" in text:
+            failures.append("workflow still exposes old single-video runtime")
+        if "workflow_dispatch:" in text or "workflow_call:" in text:
+            failures.append("transcribe workflow must remain queue-triggered only")
 
     return {"ok": not failures, "failures": failures, "required_count": len(REQUIRED), "forbidden_count": len(FORBIDDEN)}
 
@@ -160,8 +195,9 @@ def main() -> None:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     result = run_checks()
+    payload = {"mode": args.mode, **result}
     if args.json:
-        print(json.dumps({"mode": args.mode, **result}, indent=2))
+        print(json.dumps(payload, indent=2))
     else:
         print("repository-doctor: OK" if result["ok"] else "repository-doctor: FAILED")
         for failure in result["failures"]:

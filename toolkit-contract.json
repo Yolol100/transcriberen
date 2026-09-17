@@ -1,42 +1,28 @@
 {
-  "schema_version": "2.1",
-  "capability_id": "public-youtube-caption-acquisition",
+  "schema_version": "3.0",
+  "capability_id": "public-youtube-channel-caption-corpus",
   "repository": "Yolol100/transcriberen",
-  "evidence_role": "controlled_runtime_public_youtube_caption_acquisition",
+  "evidence_role": "controlled_runtime_public_youtube_channel_caption_corpus",
   "requires_account": false,
   "requires_api_key": false,
   "requires_mcp": false,
   "runtime_target": "self-hosted-or-local-direct-network",
-  "inputs": ["youtube-video-url", "youtube-short-url", "optional-language"],
-  "outputs": ["result.json", "transcript.txt when captions exist", "processed-index.json", "SHA256SUMS.txt"],
+  "inputs": ["youtube-channel-url", "optional-language"],
+  "fixed_policy": {"year": 2026, "max_videos": 1000, "comments_per_video": 7, "comment_sort": "top", "include_replies": false},
+  "outputs": ["result.json", "manifest.json", "progress.json", "processed-index.json", "videos/<video_id>/transcript.txt when captions exist", "videos/<video_id>/comments.json", "videos/<video_id>/metadata.json", "channel-corpus.zip", "SHA256SUMS.txt"],
   "tools": [
-    {
-      "id": "yt-dlp",
-      "version": "2026.08.20.234504",
-      "sha256": "8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93",
-      "release_channel": "nightly",
-      "provisioning": "exact system binary or SHA-256-verified local fallback",
-      "purpose": "discover and download one public caption track without media"
-    },
-    {
-      "id": "deno-ejs-runtime",
-      "version": "2.9.5",
-      "sha256": "8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530",
-      "provisioning": "exact system binary or SHA-256-verified local fallback",
-      "purpose": "JavaScript challenge runtime explicitly wired into yt-dlp"
-    }
+    {"id": "yt-dlp", "version": "2026.08.20.234504", "sha256": "8962aa45f945ae5aa11ab49acab365e8baef569ec995149f99ae0ae3a19cae93", "release_channel": "nightly"},
+    {"id": "deno-ejs-runtime", "version": "2.9.5", "sha256": "8b010a3b1a4a0188a67cdb8a7a27348b2a501af78aec7fc74f2ace167368d530"}
   ],
   "boundaries": [
-    "Only direct public YouTube video and Short URLs are accepted.",
-    "With an explicit language, an exact language code is preferred before a broader family match; manual beats automatic for the same exact language. With language=auto, English then Dutch then another language is selected, with manual before automatic within a language.",
-    "If no caption track exists, the request succeeds with status skipped_no_captions and no transcript file.",
-    "The acquisition job runs only on a dedicated self-hosted Linux x64 runner or through scripts/run_local.sh on a normal direct network connection.",
-    "Successful transcripts are cached on the trusted execution host by video ID and requested language, so an already processed caption can be returned without another YouTube request.",
-    "The persistent host cache is execution state, not repository or project truth; it is never committed to main. processed-index.json is a per-run readback export without transcript text.",
-    "No comments, channel or playlist discovery, search, ranking, topic filtering, engagement data, knowledge handoff, article/feed/sitemap extraction, audio fallback or Whisper exists in this runtime.",
+    "Only public YouTube channel URLs are accepted; they are normalized to the /videos tab.",
+    "Direct video, Short and playlist requests are rejected.",
+    "Only videos whose exact upload_date is in 2026 enter the corpus.",
+    "At most 1000 channel video entries are inspected per run.",
+    "Per matched video, at most 7 top-level comments are requested with YouTube-side top sorting; replies are excluded.",
+    "Comments are supplemental and non-gating; unavailable comments do not invalidate a valid public caption transcript.",
     "No cookies, login, proxy, CAPTCHA bypass, PO token or media download is used.",
-    "Deno is passed explicitly to yt-dlp through --js-runtimes; it is not a dead prerequisite.",
-    "Only minimal caption provenance is persisted; raw yt-dlp metadata is not persisted.",
-    "Project identity, live source-set versions, project routing and project policy are supplied and owned outside this repository."
+    "The persistent host cache stores validated caption text, not project truth; comments are refreshed per run.",
+    "Project identity, Skill routing and promotion of transcript knowledge are owned outside this repository."
   ]
 }

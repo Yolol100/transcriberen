@@ -1,6 +1,6 @@
 {
-  "enabled": false,
-  "request_id": "example-request-disabled",
-  "url": "https://www.youtube.com/watch?v=VIDEO_ID001",
+  "enabled": true,
+  "request_id": "example-channel-2026",
+  "url": "https://www.youtube.com/@BrianCoords",
   "language": "auto"
 }

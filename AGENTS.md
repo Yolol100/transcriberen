@@ -1,32 +1,20 @@
 # Repository agent contract
 
-Deze repository is captions-only.
+Deze repository is kanaal-only.
 
 ## Doel
 
-Publieke YouTube-video of Short -> één captiontrack -> `transcript.txt`.
+Publiek YouTube-kanaal -> `/videos` -> maximaal 1000 entries inspecteren -> alleen exacte `upload_date` in 2026 -> publieke captiontekst + maximaal 7 top-level comments per video -> gevalideerd corpus/ZIP.
 
-Geen captions -> `skipped_no_captions` en geen transcript.
+## Harde grenzen
 
-Daarnaast mag een reeds aangeleverd transcriptcorpus lokaal fail-closed worden gevalideerd als `evidence_only`. Die intake voert zelf geen YouTube-discovery of netwerkacquisitie uit en promoveert transcriptinhoud nooit automatisch naar project-, Skill- of geheugenwaarheid.
+- geen directe video-, Short- of playlistinput;
+- geen video/audio-download, FFmpeg of Whisper;
+- geen cookies, login, browserprofielen, proxies, CAPTCHA- of PO-token-bypass;
+- comments zijn `top`, maximaal 7 per video, top-level only, geen replies;
+- comments zijn non-gating; captionstatus blijft zelfstandig zichtbaar;
+- project-/Skillkennis wordt nooit automatisch gepromoveerd.
 
-## Niet uitbreiden zonder expliciete productscopewijziging
+YouTube-acquisitie draait alleen lokaal of op `[self-hosted, linux, x64, webactueel-transcribe]`. GitHub-hosted jobs valideren alleen de append-only requestqueue.
 
-Voeg geen comments, search, channel/playlist discovery, ranking, topicfilters, engagement, knowledge-routing, artikel/feed/sitemapextractie, audio, FFmpeg, Whisper, cookies, login, proxies, CAPTCHA/PO-token-bypass of media-download toe.
-
-Een aangeleverd corpus mag alleen via de aparte `external-youtube-caption-corpus-intake` worden gecontroleerd op structuur, provenance en hashes. Houd die capability gescheiden van `toolkit-contract.json` en de directe video/Short-runtime.
-
-## Runtime
-
-YouTube-acquisitie draait alleen op `[self-hosted, linux, x64, webactueel-transcribe]` of lokaal met `scripts/run_local.sh`. GitHub-hosted runners mogen alleen queue-input valideren.
-
-De external-corpus-intake is uitsluitend lokale bestandsvalidatie; zij mag geen netwerktoegang nodig hebben.
-
-## Wijzigingen
-
-- behoud het minimale requestcontract: `enabled`, `request_id`, `url`, `language`;
-- behoud `--skip-download` op iedere yt-dlp-route;
-- onbekende requestvelden blijven fail-closed;
-- update tests en `toolkit-contract.json` bij wijzigingen aan de directe acquisitiecapability;
-- update tests en `external-corpus-contract.json` bij wijzigingen aan de lokale corpusintake;
-- run vóór merge: Python compile, shell syntax, volledige unittest-suite en repository doctor.
+Update tests, `toolkit-contract.json`, security/threat-model en doctor bij iedere scopewijziging. Run vóór merge: Python compile, shell syntax, unittest-suite en repository doctor.
