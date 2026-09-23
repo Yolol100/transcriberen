@@ -18,7 +18,7 @@
   ],
   "boundaries": [
     "This capability does not perform YouTube search, channel discovery, playlist discovery, network acquisition, media download, login, cookie use, proxying, CAPTCHA bypass or PO-token handling.",
-    "The existing public-youtube-caption-acquisition capability and its toolkit-contract.json remain unchanged and direct-video/Short only.",
+    "The public network-acquisition capability is defined only by the current toolkit-contract.json. At schema 3.0 it is public YouTube channel-corpus acquisition and rejects direct video, Short and playlist requests; this external-intake contract does not redefine that network capability.",
     "Only supplied corpus packages with a consistent receipt, manifest, result ZIP SHA-256 and per-transcript RUN-SHA256 inventory are accepted.",
     "Archive path traversal, symlinks, duplicate paths, unreasonable member counts and unreasonable uncompressed size are rejected before extraction.",
     "A partial run can be accepted as evidence only when partial reasons are preserved; partial is never upgraded to success.",
