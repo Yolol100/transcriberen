@@ -12,8 +12,11 @@ Publiek YouTube-kanaal -> `/videos` -> maximaal 1000 entries inspecteren -> alle
 - geen video/audio-download, FFmpeg of Whisper;
 - geen cookies, login, browserprofielen, proxies, CAPTCHA- of PO-token-bypass;
 - comments zijn `top`, maximaal 7 per video, top-level only, geen replies;
+- video-acquisitie is begrensd tot maximaal 7 gelijktijdig actieve video's en batches van maximaal 7;
 - comments zijn non-gating; captionstatus blijft zelfstandig zichtbaar;
 - project-/Skillkennis wordt nooit automatisch gepromoveerd.
+
+Na expliciete `access_blocked`-evidence start geen volgende video-batch met nieuwe YouTube-netwerkacquisitie.
 
 Queue-acquisitie probeert eerst GitHub-hosted `ubuntu-24.04`. Alleen expliciete `access_blocked`-evidence mag automatisch doorvallen naar `[self-hosted, linux, x64, webactueel-transcribe]`. Generieke fouten mogen die fallback niet activeren. Lokaal uitvoeren blijft ondersteund.
 

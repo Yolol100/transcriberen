@@ -2,6 +2,8 @@ import json
 import os
 import pathlib
 import tempfile
+import threading
+import time
 import unittest
 import sys
 
@@ -157,6 +159,62 @@ class ChannelRuntimeTests(unittest.TestCase):
         channel.main()
         index = json.loads((ROOT / 'results/processed-index.json').read_text())
         self.assertEqual([item['video_id'] for item in index['items']], [vid])
+        validator.validate(ROOT / 'results/result.json')
+
+    def test_video_processing_is_bounded_to_seven_workers_and_preserves_order(self):
+        ids = [f"{index:011d}" for index in range(14)]
+        channel.discover_channel = lambda url, limit: ({'id':'UC1','title':'Example','url':url}, ids)
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def metadata(url):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                time.sleep(0.03)
+                return self.valid_video(url[-11:])
+            finally:
+                with lock:
+                    active -= 1
+
+        captions.load_metadata = metadata
+        self.use_happy_caption_stubs()
+        channel.main()
+
+        manifest = json.loads((ROOT / 'results/manifest.json').read_text())
+        self.assertGreaterEqual(max_active, 2)
+        self.assertLessEqual(max_active, 7)
+        self.assertEqual([item['video_id'] for item in manifest['items']], ids)
+        self.assertEqual(manifest['policy']['video_concurrency'], 7)
+        validator.validate(ROOT / 'results/result.json')
+
+    def test_access_block_prevents_new_network_work_in_later_batches(self):
+        ids = [f"{index + 100:011d}" for index in range(14)]
+        channel.discover_channel = lambda url, limit: ({'id':'UC1','title':'Example','url':url}, ids)
+        calls = []
+        lock = threading.Lock()
+
+        def metadata(url):
+            video_id = url[-11:]
+            with lock:
+                calls.append(video_id)
+            if video_id == ids[0]:
+                raise RuntimeError('access_blocked::HTTP Error 429: Too Many Requests')
+            time.sleep(0.02)
+            return self.valid_video(video_id)
+
+        captions.load_metadata = metadata
+        self.use_happy_caption_stubs()
+        channel.main()
+
+        manifest = json.loads((ROOT / 'results/manifest.json').read_text())
+        self.assertLessEqual(len(calls), 7)
+        self.assertTrue(set(calls).issubset(set(ids[:7])))
+        self.assertEqual(manifest['counts']['checked'], 14)
+        self.assertTrue(any(item['reason'] == 'deferred_after_access_block' for item in manifest['unresolved']))
         validator.validate(ROOT / 'results/result.json')
 
     def test_channel_discovery_failure_still_has_valid_readback_contract(self):

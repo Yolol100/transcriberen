@@ -50,6 +50,7 @@ FIXED_POLICY = {
     "comments_per_video": 7,
     "comment_sort": "top",
     "include_replies": False,
+    "video_concurrency": 7,
 }
 
 
@@ -147,6 +148,10 @@ def run_checks(root: Path = ROOT) -> dict:
             ('"partial_reasons"', "partial corpus reasons are not emitted"),
             ('"unresolved"', "unresolved metadata evidence is not emitted"),
             ('channel-corpus.zip', "channel ZIP output missing"),
+            ('VIDEO_CONCURRENCY = 7', "channel runtime concurrency must remain bounded to seven"),
+            ('max_workers=VIDEO_CONCURRENCY', "channel runtime does not use the bounded worker limit"),
+            ('range(0, len(video_ids), VIDEO_CONCURRENCY)', "channel runtime does not advance in bounded batches"),
+            ('access_blocked_event', "channel runtime lacks access-block backpressure"),
         ):
             if needle not in text:
                 failures.append(message)

@@ -18,6 +18,7 @@ De oude directe single-video/Short-ingang bestaat niet meer.
 - legacy `/c/` en `/user/` kanaalvormen
 - optionele captiontaal via `language`; standaard `auto`
 - maximaal 1000 entries van de `/videos`-tab
+- maximaal 7 video's tegelijk actief; de runtime schuift door in begrensde batches van 7
 - alleen video's met exacte `upload_date` in 2026
 - een gekozen publieke captiontrack per video
 - maximaal 7 YouTube-side `top` gesorteerde top-level comments per video
@@ -69,6 +70,7 @@ Andere requestvelden worden fail-closed geweigerd. Jaar, videolimiet en commentb
 - `comments_per_video = 7`
 - `comment_sort = top`
 - replies = uit
+- `video_concurrency = 7` (vaste runtimepolicy, niet instelbaar via requests)
 
 ## Queue
 
@@ -77,6 +79,12 @@ Operationele requests worden append-only toegevoegd op branch `runtime-requests`
 `requests/queue/<request_id>.json`
 
 De bestandsnaam moet exact gelijk zijn aan `request_id`. De transportcommit mag precies een nieuw requestbestand toevoegen. Geen acquisitierunner voert code vanaf de transportbranch uit.
+
+## Snelheid en backpressure
+
+De video-acquisitie is I/O-gebonden en wordt daarom parallel uitgevoerd met maximaal 7 workers. Een batch bevat nooit meer dan 7 video's. Metadata, captions en comments van verschillende video's mogen parallel lopen; binnen één video blijft de volgorde gecontroleerd. `progress.json` wordt duurzaam per batch bijgewerkt in plaats van na iedere tussenstap. De eind-ZIP gebruikt een snellere deflate-instelling om onnodige CPU-wachttijd te beperken.
+
+Bij expliciete `access_blocked`-evidence (zoals HTTP 403/429 of anti-botmelding) wordt geen volgende batch gestart met nieuwe YouTube-netwerkacquisitie. De maximaal 7 reeds actieve workers mogen hun begrensde werk afronden. Dit is backpressure, geen bypass.
 
 ## Cache en hervatten
 

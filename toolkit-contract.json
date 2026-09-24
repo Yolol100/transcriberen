@@ -8,7 +8,7 @@
   "requires_mcp": false,
   "runtime_target": "github-hosted-first-self-hosted-fallback-or-local-direct-network",
   "inputs": ["youtube-channel-url", "optional-language"],
-  "fixed_policy": {"year": 2026, "max_videos": 1000, "comments_per_video": 7, "comment_sort": "top", "include_replies": false},
+  "fixed_policy": {"year": 2026, "max_videos": 1000, "comments_per_video": 7, "comment_sort": "top", "include_replies": false, "video_concurrency": 7},
   "outputs": ["result.json", "manifest.json", "progress.json", "processed-index.json", "videos/<video_id>/transcript.txt when captions exist", "videos/<video_id>/comments.json", "videos/<video_id>/metadata.json", "channel-corpus.zip", "SHA256SUMS.txt"],
   "tools": [
     {"id": "yt-dlp", "version": "2026.09.16.232951", "sha256": "f8ca14db511702a5dbfc5a527056312907ddd0914d0b4036f108d6849e17ef61", "release_channel": "nightly"},
@@ -19,6 +19,8 @@
     "Direct video, Short and playlist requests are rejected.",
     "Only videos whose exact upload_date is in 2026 enter the corpus.",
     "At most 1000 channel video entries are inspected per run.",
+    "Video acquisition is bounded to at most 7 concurrently active videos and advances in batches of at most 7.",
+    "After explicit access_blocked evidence is observed, later batches do not start new YouTube network acquisition.",
     "Per matched video, at most 7 top-level comments are requested with YouTube-side top sorting; replies are excluded with yt-dlp max-depth=1 and runtime filtering.",
     "Unavailable comments do not invalidate a valid transcript, but they make the channel corpus partial rather than complete.",
     "Video metadata that cannot prove the upload year is retained as unresolved evidence and makes the run partial.",

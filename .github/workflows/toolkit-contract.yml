@@ -70,6 +70,7 @@ jobs:
               'comments_per_video': 7,
               'comment_sort': 'top',
               'include_replies': False,
+              'video_concurrency': 7,
           }
           for key in ('owner_skill', 'owner_mode', 'project_id', 'source_set_version'):
               assert key not in contract, f'project/skill truth leaked into capability contract: {key}'
@@ -95,7 +96,7 @@ jobs:
           assert '"--no-warnings"' not in engine
 
           channel = pathlib.Path('scripts/channel_runtime.py').read_text(encoding='utf-8')
-          for needle in ('"--playlist-end"', 'str(max_videos)', 'upload_date.startswith("2026")', 'load_top_comments', '"metadata_failures"', '"partial_reasons"', '"unresolved"', 'channel-corpus.zip'):
+          for needle in ('"--playlist-end"', 'str(max_videos)', 'upload_date.startswith("2026")', 'load_top_comments', '"metadata_failures"', '"partial_reasons"', '"unresolved"', 'channel-corpus.zip', 'VIDEO_CONCURRENCY = 7', 'max_workers=VIDEO_CONCURRENCY', 'range(0, len(video_ids), VIDEO_CONCURRENCY)', 'access_blocked_event'):
               assert needle in channel
 
           hybrid = pathlib.Path('scripts/classify_hybrid_result.py').read_text(encoding='utf-8')
