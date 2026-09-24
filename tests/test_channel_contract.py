@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import pathlib
 import unittest
 
@@ -35,6 +36,13 @@ class ChannelRequestTests(unittest.TestCase):
     def test_playlist_is_rejected(self):
         with self.assertRaises(ValueError):
             resolver.validate_request({"enabled": True, "request_id": "channel-004", "url": "https://www.youtube.com/playlist?list=abc"})
+
+
+class RuntimePolicyTests(unittest.TestCase):
+    def test_toolkit_contract_bounds_video_concurrency_to_seven(self):
+        contract = json.loads((ROOT / 'toolkit-contract.json').read_text(encoding='utf-8'))
+        self.assertEqual(contract['fixed_policy']['video_concurrency'], 7)
+        self.assertTrue(any('at most 7 concurrently active videos' in item for item in contract['boundaries']))
 
 
 class CommentTests(unittest.TestCase):
