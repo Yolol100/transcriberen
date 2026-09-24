@@ -167,19 +167,6 @@ def write_failed_discovery(request: dict, provenance: dict, progress: dict, exc:
 
 def process_video(video_id: str, request: dict, access_blocked_event: threading.Event) -> dict:
     url = f"https://www.youtube.com/watch?v={video_id}"
-    if access_blocked_event.is_set():
-        return {
-            "kind": "unresolved",
-            "unresolved": {
-                "video_id": video_id,
-                "url": url,
-                "status": "access_blocked",
-                "reason": "deferred_after_access_block",
-                "error": "network acquisition skipped after access-block evidence in the same run",
-            },
-            "access_blocked": True,
-        }
-
     try:
         meta = captions.load_metadata(url)
     except Exception as exc:
@@ -363,31 +350,49 @@ def main() -> None:
     ) as executor:
         for start in range(0, len(video_ids), VIDEO_CONCURRENCY):
             batch = video_ids[start:start + VIDEO_CONCURRENCY]
-            futures = [
-                executor.submit(process_video, video_id, request, access_blocked_event)
-                for video_id in batch
-            ]
-            for video_id, future in zip(batch, futures):
-                counts["checked"] += 1
-                try:
-                    outcome = future.result()
-                except Exception as exc:
-                    shutil.rmtree(VIDEOS / video_id, ignore_errors=True)
-                    status, detail = failure_parts(exc)
-                    if status == "access_blocked":
-                        access_blocked_event.set()
-                    outcome = {
+            if access_blocked_event.is_set():
+                outcomes = [
+                    {
                         "kind": "unresolved",
                         "unresolved": {
                             "video_id": video_id,
                             "url": f"https://www.youtube.com/watch?v={video_id}",
-                            "status": status,
-                            "reason": "video_worker_failed",
-                            "error": detail[-2000:],
+                            "status": "access_blocked",
+                            "reason": "deferred_after_access_block",
+                            "error": "network acquisition skipped because a previous batch produced access-block evidence",
                         },
-                        "access_blocked": status == "access_blocked",
+                        "access_blocked": True,
                     }
+                    for video_id in batch
+                ]
+            else:
+                futures = [
+                    executor.submit(process_video, video_id, request, access_blocked_event)
+                    for video_id in batch
+                ]
+                outcomes = []
+                for video_id, future in zip(batch, futures):
+                    try:
+                        outcomes.append(future.result())
+                    except Exception as exc:
+                        shutil.rmtree(VIDEOS / video_id, ignore_errors=True)
+                        status, detail = failure_parts(exc)
+                        if status == "access_blocked":
+                            access_blocked_event.set()
+                        outcomes.append({
+                            "kind": "unresolved",
+                            "unresolved": {
+                                "video_id": video_id,
+                                "url": f"https://www.youtube.com/watch?v={video_id}",
+                                "status": status,
+                                "reason": "video_worker_failed",
+                                "error": detail[-2000:],
+                            },
+                            "access_blocked": status == "access_blocked",
+                        })
 
+            for video_id, outcome in zip(batch, outcomes):
+                counts["checked"] += 1
                 if outcome["kind"] == "unresolved":
                     counts["metadata_failures"] += 1
                     unresolved.append(outcome["unresolved"])
