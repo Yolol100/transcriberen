@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import shutil
+import threading
 import zipfile
 from pathlib import Path
 
@@ -13,12 +15,15 @@ import captions_runtime as captions
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
 VIDEOS = RESULTS / "videos"
+VIDEO_CONCURRENCY = 7
+ZIP_COMPRESSLEVEL = 3
 POLICY = {
     "year": 2026,
     "max_videos": 1000,
     "comments_per_video": 7,
     "comment_sort": "top",
     "include_replies": False,
+    "video_concurrency": VIDEO_CONCURRENCY,
 }
 COUNT_KEYS = (
     "discovered",
@@ -105,7 +110,7 @@ def failure_parts(exc: Exception) -> tuple[str, str]:
 
 def build_zip() -> None:
     target = RESULTS / "channel-corpus.zip"
-    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=ZIP_COMPRESSLEVEL) as zf:
         for path in sorted(RESULTS.rglob("*")):
             if not path.is_file() or path == target or path.name == "SHA256SUMS.txt":
                 continue
@@ -159,6 +164,164 @@ def write_failed_discovery(request: dict, provenance: dict, progress: dict, exc:
     print(json.dumps({"request_id": request["request_id"], "status": status}))
 
 
+
+def process_video(video_id: str, request: dict, access_blocked_event: threading.Event) -> dict:
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    if access_blocked_event.is_set():
+        return {
+            "kind": "unresolved",
+            "unresolved": {
+                "video_id": video_id,
+                "url": url,
+                "status": "access_blocked",
+                "reason": "deferred_after_access_block",
+                "error": "network acquisition skipped after access-block evidence in the same run",
+            },
+            "access_blocked": True,
+        }
+
+    try:
+        meta = captions.load_metadata(url)
+    except Exception as exc:
+        status, detail = failure_parts(exc)
+        if status == "access_blocked":
+            access_blocked_event.set()
+        return {
+            "kind": "unresolved",
+            "unresolved": {
+                "video_id": video_id,
+                "url": url,
+                "status": status,
+                "reason": "metadata_acquisition_failed",
+                "error": detail[-2000:],
+            },
+            "access_blocked": status == "access_blocked",
+        }
+
+    upload_date = str(meta.get("upload_date") or "")
+    if not upload_date:
+        return {
+            "kind": "unresolved",
+            "unresolved": {
+                "video_id": video_id,
+                "url": url,
+                "status": "error",
+                "reason": "missing_upload_date",
+                "error": "video metadata did not contain upload_date; 2026 membership cannot be proven",
+            },
+            "access_blocked": False,
+        }
+    if not upload_date.startswith("2026"):
+        return {"kind": "ignored", "video_id": video_id, "access_blocked": False}
+
+    title = str(meta.get("title") or video_id)
+    video_dir = VIDEOS / video_id
+    video_dir.mkdir(parents=True, exist_ok=True)
+    transcript_status = "skipped_no_captions"
+    caption_meta = None
+    transcript_sha = None
+    cache_hit = False
+
+    with cache.connect() as conn:
+        cached = cache.get_cached_transcript(conn, video_id, request["language"])
+        if cached:
+            transcript = cached["text"]
+            caption_meta = cached["caption"]
+            transcript_sha = cached["sha256"]
+            transcript_status = "ok"
+            cache_hit = True
+            (video_dir / "transcript.txt").write_text(transcript, encoding="utf-8")
+        else:
+            track = captions.choose_caption_track(meta, request["language"])
+            if track:
+                try:
+                    transcript, caption_meta = captions.download_caption(url, track)
+                    transcript_sha = captions.sha256_text(transcript)
+                    transcript_status = "ok"
+                    (video_dir / "transcript.txt").write_text(transcript, encoding="utf-8")
+                    cache.store_result(
+                        conn,
+                        video_id=video_id,
+                        language=request["language"],
+                        url=url,
+                        status="ok",
+                        caption=caption_meta,
+                        transcript=transcript,
+                        upload_date=upload_date,
+                        title=title,
+                    )
+                except Exception as exc:
+                    transcript_status, _ = failure_parts(exc)
+                    if transcript_status == "access_blocked":
+                        access_blocked_event.set()
+                    cache.store_result(
+                        conn,
+                        video_id=video_id,
+                        language=request["language"],
+                        url=url,
+                        status=transcript_status,
+                        caption=None,
+                        transcript=None,
+                        upload_date=upload_date,
+                        title=title,
+                    )
+            else:
+                cache.store_result(
+                    conn,
+                    video_id=video_id,
+                    language=request["language"],
+                    url=url,
+                    status="skipped_no_captions",
+                    caption=None,
+                    transcript=None,
+                    upload_date=upload_date,
+                    title=title,
+                )
+
+    if access_blocked_event.is_set():
+        comments, comments_status = [], "unavailable"
+    else:
+        try:
+            comments, comments_status = captions.load_top_comments(
+                url,
+                int(request["comments_per_video"]),
+            )
+        except Exception as exc:
+            comments = []
+            comments_status, _ = failure_parts(exc)
+        if comments_status == "access_blocked":
+            access_blocked_event.set()
+
+    write_json(video_dir / "comments.json", {
+        "status": comments_status,
+        "sort": "top",
+        "include_replies": False,
+        "count": len(comments),
+        "comments": comments,
+    })
+    metadata = {
+        "video_id": video_id,
+        "url": url,
+        "title": title,
+        "upload_date": upload_date,
+        "transcript_status": transcript_status,
+        "caption": caption_meta,
+        "transcript_sha256": transcript_sha,
+        "cache_hit": cache_hit,
+        "comments_status": comments_status,
+        "comments_count": len(comments),
+    }
+    write_json(video_dir / "metadata.json", metadata)
+    return {
+        "kind": "matched",
+        "metadata": metadata,
+        "index_entry": (video_id, request["language"]),
+        "access_blocked": (
+            transcript_status == "access_blocked"
+            or comments_status == "access_blocked"
+        ),
+    }
+
 def main() -> None:
     request_file = Path(os.environ.get("REQUEST_FILE", "resolved-request.json"))
     request = json.loads(request_file.read_text(encoding="utf-8"))
@@ -187,153 +350,78 @@ def main() -> None:
     unresolved = []
     index_entries: list[tuple[str, str]] = []
     counts = empty_counts(len(video_ids))
+    order = {video_id: index for index, video_id in enumerate(video_ids)}
+    access_blocked_event = threading.Event()
 
-    with cache.connect() as conn:
-        for video_id in video_ids:
-            counts["checked"] += 1
-            progress["checked"] = counts["checked"]
-            url = f"https://www.youtube.com/watch?v={video_id}"
-            try:
-                meta = captions.load_metadata(url)
-            except Exception as exc:
-                status, detail = failure_parts(exc)
-                counts["metadata_failures"] += 1
-                unresolved.append({
-                    "video_id": video_id,
-                    "url": url,
-                    "status": status,
-                    "reason": "metadata_acquisition_failed",
-                    "error": detail[-2000:],
-                })
-                progress["unresolved"] = len(unresolved)
-                write_json(RESULTS / "progress.json", progress)
-                continue
+    # Initialize the WAL-backed cache schema before worker threads open their own connections.
+    with cache.connect():
+        pass
 
-            upload_date = str(meta.get("upload_date") or "")
-            if not upload_date:
-                counts["metadata_failures"] += 1
-                unresolved.append({
-                    "video_id": video_id,
-                    "url": url,
-                    "status": "error",
-                    "reason": "missing_upload_date",
-                    "error": "video metadata did not contain upload_date; 2026 membership cannot be proven",
-                })
-                progress["unresolved"] = len(unresolved)
-                write_json(RESULTS / "progress.json", progress)
-                continue
-            if not upload_date.startswith("2026"):
-                write_json(RESULTS / "progress.json", progress)
-                continue
+    with ThreadPoolExecutor(
+        max_workers=VIDEO_CONCURRENCY,
+        thread_name_prefix="youtube-video",
+    ) as executor:
+        for start in range(0, len(video_ids), VIDEO_CONCURRENCY):
+            batch = video_ids[start:start + VIDEO_CONCURRENCY]
+            futures = [
+                executor.submit(process_video, video_id, request, access_blocked_event)
+                for video_id in batch
+            ]
+            for video_id, future in zip(batch, futures):
+                counts["checked"] += 1
+                try:
+                    outcome = future.result()
+                except Exception as exc:
+                    shutil.rmtree(VIDEOS / video_id, ignore_errors=True)
+                    status, detail = failure_parts(exc)
+                    if status == "access_blocked":
+                        access_blocked_event.set()
+                    outcome = {
+                        "kind": "unresolved",
+                        "unresolved": {
+                            "video_id": video_id,
+                            "url": f"https://www.youtube.com/watch?v={video_id}",
+                            "status": status,
+                            "reason": "video_worker_failed",
+                            "error": detail[-2000:],
+                        },
+                        "access_blocked": status == "access_blocked",
+                    }
 
-            counts["matched_2026"] += 1
-            progress["matched_2026"] = counts["matched_2026"]
-            title = str(meta.get("title") or video_id)
-            video_dir = VIDEOS / video_id
-            video_dir.mkdir(parents=True, exist_ok=True)
-            transcript_status = "skipped_no_captions"
-            caption_meta = None
-            transcript_sha = None
-            cache_hit = False
-            index_entries.append((video_id, request["language"]))
+                if outcome["kind"] == "unresolved":
+                    counts["metadata_failures"] += 1
+                    unresolved.append(outcome["unresolved"])
+                elif outcome["kind"] == "matched":
+                    metadata = outcome["metadata"]
+                    items.append(metadata)
+                    index_entries.append(outcome["index_entry"])
+                    counts["matched_2026"] += 1
+                    if metadata["transcript_status"] == "ok":
+                        counts["captions_ok"] += 1
+                    elif metadata["transcript_status"] == "skipped_no_captions":
+                        counts["no_captions"] += 1
+                    else:
+                        counts["caption_failures"] += 1
+                    if metadata["comments_status"] == "ok":
+                        counts["comments_ok"] += 1
+                    else:
+                        counts["comments_unavailable"] += 1
+                    if metadata["cache_hit"]:
+                        counts["cache_hits"] += 1
 
-            cached = cache.get_cached_transcript(conn, video_id, request["language"])
-            if cached:
-                transcript = cached["text"]
-                caption_meta = cached["caption"]
-                transcript_sha = cached["sha256"]
-                transcript_status = "ok"
-                cache_hit = True
-                counts["cache_hits"] += 1
-                (video_dir / "transcript.txt").write_text(transcript, encoding="utf-8")
-            else:
-                track = captions.choose_caption_track(meta, request["language"])
-                if track:
-                    try:
-                        transcript, caption_meta = captions.download_caption(url, track)
-                        transcript_sha = captions.sha256_text(transcript)
-                        transcript_status = "ok"
-                        (video_dir / "transcript.txt").write_text(transcript, encoding="utf-8")
-                        cache.store_result(
-                            conn,
-                            video_id=video_id,
-                            language=request["language"],
-                            url=url,
-                            status="ok",
-                            caption=caption_meta,
-                            transcript=transcript,
-                            upload_date=upload_date,
-                            title=title,
-                        )
-                    except Exception as exc:
-                        transcript_status, _ = failure_parts(exc)
-                        cache.store_result(
-                            conn,
-                            video_id=video_id,
-                            language=request["language"],
-                            url=url,
-                            status=transcript_status,
-                            caption=None,
-                            transcript=None,
-                            upload_date=upload_date,
-                            title=title,
-                        )
-                else:
-                    cache.store_result(
-                        conn,
-                        video_id=video_id,
-                        language=request["language"],
-                        url=url,
-                        status="skipped_no_captions",
-                        caption=None,
-                        transcript=None,
-                        upload_date=upload_date,
-                        title=title,
-                    )
-
-            if transcript_status == "ok":
-                counts["captions_ok"] += 1
-            elif transcript_status == "skipped_no_captions":
-                counts["no_captions"] += 1
-            else:
-                counts["caption_failures"] += 1
-
-            try:
-                comments, comments_status = captions.load_top_comments(
-                    url,
-                    int(request["comments_per_video"]),
-                )
-            except Exception as exc:
-                comments = []
-                comments_status, _ = failure_parts(exc)
-            if comments_status == "ok":
-                counts["comments_ok"] += 1
-            else:
-                counts["comments_unavailable"] += 1
-            write_json(video_dir / "comments.json", {
-                "status": comments_status,
-                "sort": "top",
-                "include_replies": False,
-                "count": len(comments),
-                "comments": comments,
+            progress.update({
+                "checked": counts["checked"],
+                "matched_2026": counts["matched_2026"],
+                "completed": len(items),
+                "unresolved": len(unresolved),
             })
-            metadata = {
-                "video_id": video_id,
-                "url": url,
-                "title": title,
-                "upload_date": upload_date,
-                "transcript_status": transcript_status,
-                "caption": caption_meta,
-                "transcript_sha256": transcript_sha,
-                "cache_hit": cache_hit,
-                "comments_status": comments_status,
-                "comments_count": len(comments),
-            }
-            write_json(video_dir / "metadata.json", metadata)
-            items.append(metadata)
-            progress["completed"] = len(items)
+            # One durable progress write per bounded batch avoids serial filesystem churn.
             write_json(RESULTS / "progress.json", progress)
 
+    items.sort(key=lambda item: order[item["video_id"]])
+    unresolved.sort(key=lambda item: order[item["video_id"]])
+
+    with cache.connect() as conn:
         cache.export_index(
             conn,
             RESULTS / "processed-index.json",
