@@ -16,7 +16,7 @@ De runtime verwerkt uitsluitend een publieke YouTube-kanaal-URL, normaliseert di
 - geen comment replies;
 - geen project-/Skillpromotie vanuit deze runtime.
 
-Het requestcontract accepteert alleen `enabled`, `request_id`, `url` en `language`. Jaar, 1000-limiet, top-7 en no-replies zijn vaste runtimepolicy en kunnen niet door queue-input worden verruimd.
+Het requestcontract accepteert alleen `enabled`, `request_id`, `url` en `language`. Jaar, 1000-limiet, top-7, no-replies en maximaal 7 gelijktijdig actieve video's zijn vaste runtimepolicy en kunnen niet door queue-input worden verruimd.
 
 ## Hybride runnergrens
 
@@ -47,6 +47,8 @@ De fallback-classifier kijkt naar kanaaldiscovery, unresolved metadata, captions
 - captioncache op self-hosted/local wordt alleen hergebruikt na SHA- en lengtecontrole;
 - `processed-index.json` bevat alleen current-run entries en lekt geen oude cachehistorie uit andere runs;
 - comments worden per run opnieuw opgehaald en niet als duurzame waarheid gecachet;
-- finale resultaten krijgen SHA256SUMS en een GitHub attestation.
+- finale resultaten krijgen SHA256SUMS en een GitHub attestation;
+- parallelle acquisitie is begrensd tot 7 workers en wordt in batches van maximaal 7 gestart;
+- na expliciete `access_blocked`-evidence start de runtime geen volgende batch met nieuwe YouTube-netwerkacquisitie.
 
 Een YouTube anti-bot- of rate-limitblokkade wordt `access_blocked`; de runtime probeert die niet te omzeilen. Als de GitHub-hosted poging wordt geblokkeerd, is de self-hosted run alleen een normale direct-network fallback en geen bypassmechanisme.
