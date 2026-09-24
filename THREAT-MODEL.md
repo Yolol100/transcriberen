@@ -14,6 +14,7 @@
 10. Captioncache mag alleen gevalideerde transcripttekst/minimale technische status bewaren en blijft buiten `main`.
 11. `processed-index.json` mag uitsluitend current-run entries bevatten en geen historische cachedata van andere kanalen.
 12. Comments/transcripts worden nooit automatisch project- of Skillwaarheid.
+13. Video-acquisitie gebruikt maximaal 7 gelijktijdig actieve workers en start geen volgende batch nadat expliciete `access_blocked`-evidence is gezien.
 
 ## Trust boundaries
 
@@ -33,7 +34,7 @@
 - **Comment-explosie:** yt-dlp gebruikt `max_comments=7,7,0,0,1`; `max-depth=1` sluit replies uit; runtime filtert replies opnieuw en validator handhaaft maximaal 7.
 - **Vals volledig resultaat:** metadata-, caption- of commentonvolledigheid forceert `partial`; validator weigert `ok` bij incomplete counts.
 - **Geen captions:** per video `skipped_no_captions`, zonder audiofallback.
-- **YouTube anti-bot/rate limiting:** `access_blocked`; GitHub-hosted blokkade mag naar normale self-hosted direct-network fallback, maar er is geen bypassroute.
+- **YouTube anti-bot/rate limiting:** `access_blocked`; GitHub-hosted blokkade mag naar normale self-hosted direct-network fallback, maar er is geen bypassroute. Bounded batches beperken de burst tot 7 video's; na blokkade wordt geen volgende netwerkbatch gestart.
 - **Cache-integriteit:** alleen overeenkomende transcript-SHA en lengte worden op self-hosted/local hergebruikt; corruptie invalidereert de entry.
 - **Cross-run cache leakage:** indexexport krijgt de expliciete current-run keyset; validator vereist exact dezelfde video-id set als het manifest.
 - **Onverwachte output:** validator controleert manifest, progress, current-run index, ZIP-structuur en verboden mediaextensies.
