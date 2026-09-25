@@ -2,6 +2,8 @@ name: Dependency Audit
 
 on:
   pull_request:
+    paths:
+      - '.github/workflows/**'
   push:
     branches: [main]
 
@@ -24,14 +26,9 @@ jobs:
           persist-credentials: false
       - name: Review introduced dependency changes when GitHub Dependency graph is available
         id: native_dependency_review
-        continue-on-error: true
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
-      - name: Record native Dependency Review capability gap
-        if: steps.native_dependency_review.outcome == 'failure'
-        run: echo 'GitHub native Dependency Review is unavailable; captions-only tool-version verification remains enforcing.' >> "$GITHUB_STEP_SUMMARY"
-
   tool-pins:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
