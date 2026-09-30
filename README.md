@@ -4,6 +4,19 @@
 
 **Rol:** publieke YouTube-kanaalcaptions en begrensde commentcontext verzamelen als evidence/discovery-input. Inhoudelijke acceptatie en promotie naar Skills/projectbronnen blijft buiten deze repository.
 
+**Developer profile:** [Andrew Baeten](https://github.com/Yolol100) · [Portfolio cases](https://andrewbaeten.nl/category/cases)
+
+## What it demonstrates
+
+| Area | Implementation |
+| --- | --- |
+| Acquisition | Public YouTube channel caption and bounded comment collection |
+| Reliability | Hosted-first execution with explicit self-hosted fallback on access blocking |
+| Concurrency | Bounded seven-worker acquisition with backpressure |
+| Provenance | Immutable runtime SHA, manifests, checksums and deterministic ZIP output |
+| Recovery | Validated cache reuse and explicit partial/access-blocked states |
+| Safety | No cookies, login, proxy, CAPTCHA bypass, audio extraction or automatic knowledge promotion |
+
 Deze repository heeft nu een publieke acquisitietaak:
 
 **YouTube-kanaal -> `/videos` -> maximaal 1000 entries -> alleen uploadjaar 2026 -> publieke captiontekst + maximaal 7 top-level comments per video -> gevalideerd corpus + ZIP.**
