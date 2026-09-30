@@ -38,7 +38,8 @@ def classify_failure(message: str) -> str:
     return "access_blocked" if any(marker in text for marker in ACCESS_BLOCK_MARKERS) else "error"
 
 
-def load_metadata(url: str) -> dict:
+def load_metadata(url: str, metadata_hint: dict | None = None) -> dict:
+    hint = dict(metadata_hint or {})
     provider_errors = []
     try:
         data = caption_profiles.metadata_for(
@@ -48,19 +49,21 @@ def load_metadata(url: str) -> dict:
         )
         if not isinstance(data, dict):
             raise innertube.InnerTubeError("caption-first provider returned unexpected metadata")
-        if not str(data.get("upload_date") or ""):
-            raise innertube.InnerTubeUnsupported(
-                "caption-first metadata did not contain exact upload_date"
-            )
-        data = dict(data)
-        data["_metadata_provider"] = "caption-first-innertube"
-        return data
+        data = {**hint, **data}
+        if str(data.get("upload_date") or ""):
+            data["_metadata_provider"] = "caption-first-innertube"
+            return data
+        provider_errors.append("caption-first: exact upload_date unavailable")
     except Exception as exc:
         provider_errors.append(f"caption-first: {exc}")
 
     completed = run([*yt_video_base(), "--dump-single-json", url])
     diagnostic = completed.stderr[-2000:]
     if completed.returncode != 0 or not completed.stdout.strip():
+        if str(hint.get("upload_date") or ""):
+            hint["_metadata_provider"] = "channel-discovery"
+            hint["_metadata_warning"] = "; ".join(provider_errors + [diagnostic or "yt-dlp metadata unavailable"])[-2000:]
+            return hint
         detail = diagnostic or "yt-dlp returned no metadata"
         evidence = provider_errors + [detail]
         status = (
@@ -75,9 +78,9 @@ def load_metadata(url: str) -> dict:
         raise RuntimeError(f"error::yt-dlp returned invalid JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise RuntimeError("error::yt-dlp returned unexpected metadata")
+    data = {**hint, **data}
     data["_metadata_provider"] = "yt-dlp"
     return data
-
 
 def _normalized_top_comments(items: object, limit: int) -> list[dict]:
     out = []
