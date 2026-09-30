@@ -62,7 +62,7 @@ jobs:
           assert contract['schema_version'] == '3.0'
           assert contract['capability_id'] == 'public-youtube-channel-caption-corpus'
           assert contract['repository'] == 'Yolol100/transcriberen'
-          assert contract['runtime_target'] == 'github-hosted-first-self-hosted-fallback-or-local-direct-network'
+          assert contract['runtime_target'] == 'github-hosted-only-or-local-direct-network'
           assert contract['inputs'] == ['youtube-channel-url', 'optional-language']
           assert contract['fixed_policy'] == {
               'year': 2026,
@@ -90,7 +90,15 @@ jobs:
           assert 'COMMENTS_PER_VIDEO = 7' in resolver
 
           engine = pathlib.Path('scripts/captions_runtime.py').read_text(encoding='utf-8')
-          for needle in ('"--skip-download"', '"--no-cookies"', 'comment_sort=top', 'max_comments={limit},{limit},0,0,1'):
+          for needle in (
+              '"--skip-download"',
+              '"--no-cookies"',
+              'comment_sort=top',
+              'max_comments={limit},{limit},0,0,1',
+              'caption_profiles.metadata_for',
+              'innertube.comments_payload',
+              'innertube.download_caption',
+          ):
               assert needle in engine
           assert 'if __name__ == "__main__"' not in engine
           assert '"--no-warnings"' not in engine
@@ -98,10 +106,6 @@ jobs:
           channel = pathlib.Path('scripts/channel_runtime.py').read_text(encoding='utf-8')
           for needle in ('"--playlist-end"', 'str(max_videos)', 'upload_date.startswith("2026")', 'load_top_comments', '"metadata_failures"', '"partial_reasons"', '"unresolved"', 'channel-corpus.zip', 'VIDEO_CONCURRENCY = 7', 'max_workers=VIDEO_CONCURRENCY', 'range(0, len(video_ids), VIDEO_CONCURRENCY)', 'access_blocked_event'):
               assert needle in channel
-
-          hybrid = pathlib.Path('scripts/classify_hybrid_result.py').read_text(encoding='utf-8')
-          for needle in ('status == "access_blocked"', 'item.get("status") == "access_blocked"', 'item.get("transcript_status") == "access_blocked"', 'item.get("comments_status") == "access_blocked"'):
-              assert needle in hybrid
 
           cache = pathlib.Path('scripts/cache_runtime.py').read_text(encoding='utf-8')
           assert '"scope": "current_run"' in cache
@@ -115,19 +119,20 @@ jobs:
           workflow = pathlib.Path('.github/workflows/transcribe.yml').read_text(encoding='utf-8')
           assert 'branches: [runtime-requests]' in workflow
           assert 'runs-on: ubuntu-24.04' in workflow
-          assert 'runs-on: [self-hosted, linux, x64, webactueel-transcribe]' in workflow
           assert 'python3 scripts/channel_runtime.py' in workflow
-          assert 'python3 scripts/classify_hybrid_result.py' in workflow
           assert 'python3 scripts/captions_runtime.py' not in workflow
-          assert 'Verify dedicated runner boundary' in workflow
-          assert 'Attest result checksum receipt' in workflow
+          assert 'Attest hosted checksum receipt' in workflow
+          assert 'Upload hosted result' in workflow
+          assert 'Fail on hosted access block or acquisition error' in workflow
           assert 'TRANSCRIBE_EXECUTION_TARGET: github-hosted' in workflow
-          assert 'TRANSCRIBE_EXECUTION_TARGET: self-hosted' in workflow
-          assert "needs.hosted_attempt.outputs.fallback_required == 'true'" in workflow
-          assert "needs.hosted_attempt.result == 'success'" in workflow
           assert 'runtime_sha: ${{ steps.runtime_sha.outputs.sha }}' in workflow
           assert 'ref: ${{ needs.resolve.outputs.runtime_sha }}' in workflow
           assert 'test "$actual" = "$EXPECTED_RUNTIME_SHA"' in workflow
+          assert 'runs-on: [self-hosted' not in workflow
+          assert 'webactueel-transcribe' not in workflow
+          assert 'fallback_required' not in workflow
+          assert 'classify_hybrid_result.py' not in workflow
+          assert 'TRANSCRIBE_EXECUTION_TARGET: self-hosted' not in workflow
           assert 'workflow_dispatch:' not in workflow
           assert 'workflow_call:' not in workflow
 
