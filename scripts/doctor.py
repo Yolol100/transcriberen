@@ -12,7 +12,8 @@ REQUIRED = {
     "scripts/captions_runtime.py",
     "scripts/channel_runtime.py",
     "scripts/cache_runtime.py",
-    "scripts/classify_hybrid_result.py",
+    "scripts/innertube_runtime.py",
+    "scripts/caption_client_profiles.py",
     "scripts/validate_result.py",
     "scripts/install_tools.sh",
     "scripts/run_local.sh",
@@ -26,12 +27,12 @@ FORBIDDEN = {
     "scripts/runtime.py",
     "scripts/runtime_topic_filter.py",
     "scripts/youtube_runtime.py",
-    "scripts/innertube_runtime.py",
-    "scripts/caption_client_profiles.py",
+    "scripts/classify_hybrid_result.py",
     "scripts/normalize_youtube_result_v2.py",
     "scripts/resolve_request_hardened.py",
     "scripts/install_python_deps.sh",
     ".github/workflows/transcribe-self-hosted.yml",
+    "docs/SELF-HOSTED-RUNNER.md",
     ".github/workflows/lock-audit.yml",
     "requirements.in",
     "requirements.txt",
@@ -43,7 +44,7 @@ YT_DLP_VERSION = "2026.09.16.232951"
 YT_DLP_SHA256 = "f8ca14db511702a5dbfc5a527056312907ddd0914d0b4036f108d6849e17ef61"
 DENO_VERSION = "2.9.7"
 DENO_SHA256 = "c6527f24f4b16031d3ae4fa9f658d5f11534c8d84ce7dc8502420280919c3490"
-RUNTIME_TARGET = "github-hosted-first-self-hosted-fallback-or-local-direct-network"
+RUNTIME_TARGET = "github-hosted-only-or-local-direct-network"
 FIXED_POLICY = {
     "year": 2026,
     "max_videos": 1000,
@@ -71,7 +72,7 @@ def run_checks(root: Path = ROOT) -> dict:
         if contract.get("capability_id") != "public-youtube-channel-caption-corpus":
             failures.append("toolkit capability_id mismatch")
         if contract.get("runtime_target") != RUNTIME_TARGET:
-            failures.append("runtime target must be hosted-first with access-block self-hosted fallback or local direct network")
+            failures.append("runtime target must be GitHub-hosted only for queued production, with optional local parity")
         if contract.get("inputs") != ["youtube-channel-url", "optional-language"]:
             failures.append("toolkit must expose only channel input plus optional language")
         if contract.get("fixed_policy") != FIXED_POLICY:
@@ -94,7 +95,8 @@ def run_checks(root: Path = ROOT) -> dict:
         "scripts/captions_runtime.py",
         "scripts/channel_runtime.py",
         "scripts/cache_runtime.py",
-        "scripts/classify_hybrid_result.py",
+        "scripts/innertube_runtime.py",
+        "scripts/caption_client_profiles.py",
         "scripts/validate_result.py",
     )
     for relative in runtime_files:
@@ -210,22 +212,28 @@ def run_checks(root: Path = ROOT) -> dict:
     if workflow.is_file():
         text = workflow.read_text(encoding="utf-8")
         for needle, message in (
-            ("runs-on: ubuntu-24.04", "transcribe workflow has no GitHub-hosted attempt"),
-            ("runs-on: [self-hosted, linux, x64, webactueel-transcribe]", "transcribe workflow is not bound to dedicated self-hosted fallback runner"),
+            ("runs-on: ubuntu-24.04", "transcribe workflow has no GitHub-hosted runtime"),
             ("branches: [runtime-requests]", "transcribe workflow must use runtime-requests branch"),
             ("python3 scripts/channel_runtime.py", "workflow does not run channel runtime"),
-            ("python3 scripts/classify_hybrid_result.py", "workflow does not classify hosted access blocks"),
-            ("needs.hosted_attempt.outputs.fallback_required == 'true'", "self-hosted fallback is not access-block gated"),
-            ("TRANSCRIBE_EXECUTION_TARGET: github-hosted", "hosted attempt provenance target missing"),
-            ("TRANSCRIBE_EXECUTION_TARGET: self-hosted", "self-hosted fallback provenance target missing"),
-            ("--result pending", "queue workflow does not publish pending hybrid status"),
-            ("Verify dedicated runner boundary", "runner boundary verification was removed"),
-            ("Attest result checksum receipt", "fallback result attestation was removed"),
+            ("TRANSCRIBE_EXECUTION_TARGET: github-hosted", "GitHub-hosted provenance target missing"),
+            ("--result pending", "queue workflow does not publish pending status"),
+            ("Attest hosted checksum receipt", "hosted result attestation is missing"),
+            ("Upload hosted result", "hosted result artifact upload is missing"),
+            ("Fail on hosted access block or acquisition error", "terminal hosted access-block guard is missing"),
             ('runtime_sha: ${{ steps.runtime_sha.outputs.sha }}', "resolve job does not expose immutable runtime SHA"),
-            ('ref: ${{ needs.resolve.outputs.runtime_sha }}', "runtime jobs are not pinned to resolved runtime SHA"),
-            ('test "$actual" = "$EXPECTED_RUNTIME_SHA"', "runtime jobs do not verify immutable runtime SHA"),
+            ('ref: ${{ needs.resolve.outputs.runtime_sha }}', "runtime job is not pinned to resolved runtime SHA"),
+            ('test "$actual" = "$EXPECTED_RUNTIME_SHA"', "runtime job does not verify immutable runtime SHA"),
         ):
             if needle not in text:
+                failures.append(message)
+        for needle, message in (
+            ("runs-on: [self-hosted", "self-hosted runner returned to production workflow"),
+            ("webactueel-transcribe", "custom transcribe runner label returned to production workflow"),
+            ("classify_hybrid_result.py", "legacy hybrid classifier returned to production workflow"),
+            ("fallback_required", "legacy machine fallback gating returned to production workflow"),
+            ("TRANSCRIBE_EXECUTION_TARGET: self-hosted", "self-hosted provenance target returned to production workflow"),
+        ):
+            if needle in text:
                 failures.append(message)
         if "python3 scripts/captions_runtime.py" in text:
             failures.append("workflow still exposes old single-video runtime")
