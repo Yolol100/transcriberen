@@ -11,7 +11,7 @@
 | Area | Implementation |
 | --- | --- |
 | Acquisition | Public YouTube channel caption and bounded comment collection |
-| Reliability | Hosted-first execution with explicit self-hosted fallback on access blocking |
+| Reliability | GitHub-hosted-only execution with caption-first provider cascade and explicit terminal access-block states |
 | Concurrency | Bounded seven-worker acquisition with backpressure |
 | Provenance | Immutable runtime SHA, manifests, checksums and deterministic ZIP output |
 | Recovery | Validated cache reuse and explicit partial/access-blocked states |
@@ -50,20 +50,20 @@ Captionkeuze bij `language=auto`: Engels, daarna Nederlands, daarna de eerste an
 - video- of audiodownload
 - cookies, login, browserprofielen, proxies, PO-tokens of CAPTCHA-bypass
 
-## Hybride uitvoering
+## GitHub-hosted uitvoering
 
-De queue draait hosted-first:
+De operationele queue draait volledig op GitHub Actions:
 
 1. de GitHub-hosted `resolve`-job valideert precies één append-only queue-request en legt de exacte vertrouwde `main`-SHA vast;
-2. een GitHub-hosted `ubuntu-24.04` runner probeert de volledige kanaalacquisitie met precies die immutable SHA;
-3. alleen wanneer het gevalideerde resultaat expliciete `access_blocked`-evidence bevat, start automatisch de dedicated fallback op `[self-hosted, linux, x64, webactueel-transcribe]`;
-4. gewone code- of acquisitiefouten triggeren de self-hosted fallback niet stil.
+2. een GitHub-hosted `ubuntu-24.04` runner voert de volledige kanaalacquisitie uit met precies die immutable SHA;
+3. per video probeert de runtime eerst accountloze caption-first InnerTube/timedtext voor metadata, captions en comments en gebruikt daarna alleen de gepinde yt-dlp-route als fallback;
+4. expliciete `access_blocked`-evidence is een terminale uitkomst: het gevalideerde diagnostische resultaat wordt gehasht, geattesteerd en als artifact opgeslagen, waarna de run faalt in plaats van naar een andere machine door te vallen.
 
-`access_blocked` wordt niet alleen op kanaaldiscovery herkend, maar ook wanneer metadata, captions of comments aantoonbaar door YouTube anti-bot/rate limiting zijn geblokkeerd. Een gewone `partial` zonder zulke blokkade-evidence blijft het hosted resultaat.
+Er is geen MSI-, self-hosted- of custom-runnerpad meer in de production queue. De GitHub-plugin kan requests, commits en runstatus besturen; de daadwerkelijke compute gebeurt op GitHub-hosted Actions.
 
-De resolve-job, hosted poging en eventuele self-hosted fallback gebruiken allemaal dezelfde vastgelegde runtime-SHA en controleren de readback. Een wijziging op `main` tijdens de run kan daardoor niet stil andere runtimecode laten uitvoeren.
+Resolve en runtime gebruiken dezelfde vastgelegde runtime-SHA en controleren de readback. Een wijziging op `main` tijdens een run kan daardoor niet stil andere runtimecode laten uitvoeren.
 
-Na requestvalidatie wordt `runtime/Transcribe Public Source` op `pending` gezet. Een succesvolle hosted run publiceert direct het eindresultaat. Bij expliciete blokkade blijft de status pending totdat de self-hosted fallback eindigt. Als ook de fallback wordt geblokkeerd, blijft dat zichtbaar als `access_blocked`; de runtime omzeilt dit niet.
+Na requestvalidatie wordt `runtime/Transcribe Public Source` op `pending` gezet. De terminale GitHub-hosted job publiceert daarna `success` of `failure`; een access block blijft expliciet zichtbaar en wordt niet omzeild.
 
 ## Request
 
@@ -101,7 +101,7 @@ Bij expliciete `access_blocked`-evidence (zoals HTTP 403/429 of anti-botmelding)
 
 ## Cache en hervatten
 
-Op de dedicated self-hosted/local host worden gevalideerde captions gecachet op `video_id + requested_language`. De transcript-SHA en lengte worden voor hergebruik gecontroleerd; corrupte cachedata wordt verwijderd en opnieuw opgehaald. GitHub-hosted runners zijn ephemeral en delen deze persistente cache niet.
+Bij een handmatige lokale parity/debugrun worden gevalideerde captions gecachet op `video_id + requested_language`. De transcript-SHA en lengte worden voor hergebruik gecontroleerd; corrupte cachedata wordt verwijderd en opnieuw opgehaald. GitHub-hosted runners zijn ephemeral en gebruiken geen persistente machine-afhankelijke cache.
 
 Comments worden niet persistent als waarheid gecachet. Iedere nieuwe kanaalrun mag daardoor opnieuw de actuele YouTube-side topselectie proberen op te halen.
 

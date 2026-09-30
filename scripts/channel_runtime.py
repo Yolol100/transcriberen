@@ -7,6 +7,7 @@ import os
 import shutil
 import threading
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import cache_runtime as cache
@@ -44,7 +45,21 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def discover_channel(channel_url: str, max_videos: int) -> tuple[dict, list[str]]:
+def _entry_upload_date(entry: dict) -> str | None:
+    value = str(entry.get("upload_date") or "")
+    if len(value) == 8 and value.isdigit():
+        return value
+    for key in ("timestamp", "release_timestamp"):
+        raw = entry.get(key)
+        try:
+            if raw is not None:
+                return datetime.fromtimestamp(float(raw), tz=timezone.utc).strftime("%Y%m%d")
+        except (TypeError, ValueError, OSError, OverflowError):
+            pass
+    return None
+
+
+def discover_channel(channel_url: str, max_videos: int) -> tuple[dict, list[str], dict[str, dict]]:
     command = [
         str(captions.BIN / "yt-dlp"),
         "--no-config",
@@ -72,12 +87,24 @@ def discover_channel(channel_url: str, max_videos: int) -> tuple[dict, list[str]
     if not isinstance(data, dict):
         raise RuntimeError("error::invalid channel metadata")
     ids = []
+    hints = {}
     for entry in data.get("entries") or []:
         if not isinstance(entry, dict):
             continue
         video_id = str(entry.get("id") or "")
-        if len(video_id) == 11 and video_id not in ids:
-            ids.append(video_id)
+        if len(video_id) != 11 or video_id in ids:
+            continue
+        ids.append(video_id)
+        hint = {
+            "id": video_id,
+            "webpage_url": f"https://www.youtube.com/watch?v={video_id}",
+        }
+        if entry.get("title"):
+            hint["title"] = str(entry["title"])
+        upload_date = _entry_upload_date(entry)
+        if upload_date:
+            hint["upload_date"] = upload_date
+        hints[video_id] = hint
         if len(ids) >= max_videos:
             break
     channel = {
@@ -85,8 +112,7 @@ def discover_channel(channel_url: str, max_videos: int) -> tuple[dict, list[str]
         "title": data.get("channel") or data.get("uploader") or data.get("title"),
         "url": channel_url,
     }
-    return channel, ids
-
+    return channel, ids, hints
 
 def clean_results() -> None:
     if RESULTS.exists():
@@ -165,10 +191,14 @@ def write_failed_discovery(request: dict, provenance: dict, progress: dict, exc:
 
 
 
-def process_video(video_id: str, request: dict, access_blocked_event: threading.Event) -> dict:
+def process_video(video_id: str, request: dict, access_blocked_event: threading.Event, metadata_hint: dict | None = None) -> dict:
     url = f"https://www.youtube.com/watch?v={video_id}"
     try:
-        meta = captions.load_metadata(url)
+        meta = (
+            captions.load_metadata(url, metadata_hint=metadata_hint)
+            if metadata_hint
+            else captions.load_metadata(url)
+        )
     except Exception as exc:
         status, detail = failure_parts(exc)
         if status == "access_blocked":
@@ -222,7 +252,7 @@ def process_video(video_id: str, request: dict, access_blocked_event: threading.
             track = captions.choose_caption_track(meta, request["language"])
             if track:
                 try:
-                    transcript, caption_meta = captions.download_caption(url, track)
+                    transcript, caption_meta = captions.download_caption(url, track, meta=meta)
                     transcript_sha = captions.sha256_text(transcript)
                     transcript_status = "ok"
                     (video_dir / "transcript.txt").write_text(transcript, encoding="utf-8")
@@ -276,9 +306,9 @@ def process_video(video_id: str, request: dict, access_blocked_event: threading.
         except Exception as exc:
             comments = []
             comments_status, _ = failure_parts(exc)
-        if comments_status == "access_blocked":
-            access_blocked_event.set()
-
+        # Comments are non-gating: a comment-only access block must not stop
+        # later caption/metadata batches.
+        
     write_json(video_dir / "comments.json", {
         "status": comments_status,
         "sort": "top",
@@ -326,7 +356,12 @@ def main() -> None:
     }
     write_json(RESULTS / "progress.json", progress)
     try:
-        channel, video_ids = discover_channel(request["url"], int(request["max_videos"]))
+        discovered = discover_channel(request["url"], int(request["max_videos"]))
+        if len(discovered) == 2:
+            channel, video_ids = discovered
+            metadata_hints = {}
+        else:
+            channel, video_ids, metadata_hints = discovered
     except Exception as exc:
         write_failed_discovery(request, provenance, progress, exc)
         return
@@ -367,7 +402,7 @@ def main() -> None:
                 ]
             else:
                 futures = [
-                    executor.submit(process_video, video_id, request, access_blocked_event)
+                    executor.submit(process_video, video_id, request, access_blocked_event, metadata_hints.get(video_id))
                     for video_id in batch
                 ]
                 outcomes = []

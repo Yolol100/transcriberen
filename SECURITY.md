@@ -18,37 +18,35 @@ De runtime verwerkt uitsluitend een publieke YouTube-kanaal-URL, normaliseert di
 
 Het requestcontract accepteert alleen `enabled`, `request_id`, `url` en `language`. Jaar, 1000-limiet, top-7, no-replies en maximaal 7 gelijktijdig actieve video's zijn vaste runtimepolicy en kunnen niet door queue-input worden verruimd.
 
-## Hybride runnergrens
+## GitHub-hosted runnergrens
 
-De queue probeert YouTube-acquisitie eerst op GitHub-hosted `ubuntu-24.04`. Alleen een gevalideerd resultaat met expliciete `access_blocked`-evidence mag automatisch doorvallen naar de dedicated Linux x64 runner met label `webactueel-transcribe`. Lokaal blijft `scripts/run_local.sh` ondersteund.
+De production queue gebruikt uitsluitend GitHub-hosted `ubuntu-24.04`. Er is geen custom runner, machinefallback of netwerkbypass.
 
-Voor beide remote acquisitieroutes geldt:
+Voor remote acquisitie geldt:
 
 - exact dezelfde vertrouwde runtime-SHA als de resolve-job heeft vastgelegd;
 - nooit runtimecode vanaf de transportbranch uitvoeren;
 - `persist-credentials: false` gebruiken;
 - proxy-omgevingsvariabelen voor acquisitie verwijderen;
-- geen cookies, accounts, browserprofielen of andere YouTube-credentials gebruiken.
-
-De self-hosted fallback controleert bovendien runner environment/OS/architectuur en hoort op een dedicated host zonder persoonlijke browserprofielen, SSH/cloudcredentials of projectsecrets te draaien.
-
-De fallback-classifier kijkt naar kanaaldiscovery, unresolved metadata, captionstatus en commentstatus. Alleen `access_blocked` activeert fallback; generieke `error`-statussen mogen niet stil op de self-hosted host worden herhaald.
+- geen cookies, accounts, browserprofielen of andere YouTube-credentials gebruiken;
+- metadata, captions en comments proberen eerst begrensde accountloze InnerTube/timedtext-providers en vallen alleen terug op de gepinde yt-dlp toolchain;
+- expliciete `access_blocked`-evidence is terminaal, wordt als evidence opgeslagen en veroorzaakt een gefaalde run.
 
 ## Uitvoer en integriteit
 
 - yt-dlp gebruikt `--skip-download` en `--no-cookies`;
-- no-replies gebruikt expliciet `max-depth=1` plus runtime filtering;
+- no-replies wordt provider-onafhankelijk afgedwongen en nogmaals runtime-gefilterd;
 - de validator weigert bekende media-extensies;
 - alleen bewezen 2026-items mogen in `manifest.json` staan;
 - metadatafouten worden als `unresolved` bewaard in plaats van stil overgeslagen;
 - commentbestanden mogen nooit meer dan 7 comments bevatten;
 - ontbrekende comments/captionfouten/metadatafouten maken de run `partial` in plaats van vals `ok`;
 - ZIP-paden worden begrensd en het archief moet manifest/result/progress/index bevatten;
-- captioncache op self-hosted/local wordt alleen hergebruikt na SHA- en lengtecontrole;
+- lokale parity-cache wordt alleen hergebruikt na SHA- en lengtecontrole;
 - `processed-index.json` bevat alleen current-run entries en lekt geen oude cachehistorie uit andere runs;
 - comments worden per run opnieuw opgehaald en niet als duurzame waarheid gecachet;
 - finale resultaten krijgen SHA256SUMS en een GitHub attestation;
 - parallelle acquisitie is begrensd tot 7 workers en wordt in batches van maximaal 7 gestart;
 - na expliciete `access_blocked`-evidence start de runtime geen volgende batch met nieuwe YouTube-netwerkacquisitie.
 
-Een YouTube anti-bot- of rate-limitblokkade wordt `access_blocked`; de runtime probeert die niet te omzeilen. Als de GitHub-hosted poging wordt geblokkeerd, is de self-hosted run alleen een normale direct-network fallback en geen bypassmechanisme.
+Een YouTube anti-bot- of rate-limitblokkade wordt `access_blocked`. De runtime probeert die niet te omzeilen en schakelt niet over naar een andere host.

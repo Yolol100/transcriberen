@@ -46,6 +46,22 @@ class DoctorTests(unittest.TestCase):
         finally:
             td.cleanup()
 
+    def test_self_hosted_runner_regression_is_detected(self):
+        td, root = self.copied_tree()
+        try:
+            path = root / '.github' / 'workflows' / 'transcribe.yml'
+            path.write_text(
+                path.read_text(encoding='utf-8')
+                + '\n# runs-on: [self-hosted, linux, x64, webactueel-transcribe]\n',
+                encoding='utf-8',
+            )
+            result = m.run_checks(root)
+            self.assertFalse(result['ok'])
+            self.assertTrue(any('self-hosted runner returned' in item for item in result['failures']))
+            self.assertTrue(any('custom transcribe runner label returned' in item for item in result['failures']))
+        finally:
+            td.cleanup()
+
     def test_reply_depth_regression_is_detected(self):
         td, root = self.copied_tree()
         try:
