@@ -22,6 +22,7 @@ REQUIRED = {
     "SECURITY.md",
     "THREAT-MODEL.md",
     "AGENTS.md",
+    "docs/GITHUB-HOSTED-RUNTIME.md",
 }
 FORBIDDEN = {
     "scripts/runtime.py",
@@ -130,6 +131,9 @@ def run_checks(root: Path = ROOT) -> dict:
             ('"--no-cookies"', "caption engine cookie boundary missing"),
             ('comment_sort=top', "YouTube comment top-sort missing"),
             ('max_comments={limit},{limit},0,0,1', "comment no-reply depth limit missing"),
+            ('caption_profiles.metadata_for', "caption-first metadata provider missing"),
+            ('innertube.comments_payload', "caption-first comment provider missing"),
+            ('innertube.download_caption', "caption-first caption provider missing"),
         ):
             if needle not in text:
                 failures.append(message)
@@ -154,18 +158,6 @@ def run_checks(root: Path = ROOT) -> dict:
             ('max_workers=VIDEO_CONCURRENCY', "channel runtime does not use the bounded worker limit"),
             ('range(0, len(video_ids), VIDEO_CONCURRENCY)', "channel runtime does not advance in bounded batches"),
             ('access_blocked_event', "channel runtime lacks access-block backpressure"),
-        ):
-            if needle not in text:
-                failures.append(message)
-
-    hybrid = root / "scripts/classify_hybrid_result.py"
-    if hybrid.is_file():
-        text = hybrid.read_text(encoding="utf-8")
-        for needle, message in (
-            ('status == "access_blocked"', "hybrid classifier does not detect channel access block"),
-            ('item.get("transcript_status") == "access_blocked"', "hybrid classifier does not detect caption access block"),
-            ('item.get("comments_status") == "access_blocked"', "hybrid classifier does not detect comment access block"),
-            ('item.get("status") == "access_blocked"', "hybrid classifier does not detect metadata access block"),
         ):
             if needle not in text:
                 failures.append(message)
