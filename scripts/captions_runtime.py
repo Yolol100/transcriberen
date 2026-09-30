@@ -11,6 +11,9 @@ import tempfile
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+import caption_client_profiles as caption_profiles
+import innertube_runtime as innertube
+
 ROOT = Path(__file__).resolve().parents[1]
 BIN = ROOT / "tools" / "bin"
 LANG_TAG_RE = re.compile(r"^[A-Za-z]{2,3}(?:[-.][A-Za-z0-9]{2,16})*$")
@@ -36,36 +39,49 @@ def classify_failure(message: str) -> str:
 
 
 def load_metadata(url: str) -> dict:
+    provider_errors = []
+    try:
+        data = caption_profiles.metadata_for(
+            innertube,
+            url,
+            include_engagement=False,
+        )
+        if not isinstance(data, dict):
+            raise innertube.InnerTubeError("caption-first provider returned unexpected metadata")
+        if not str(data.get("upload_date") or ""):
+            raise innertube.InnerTubeUnsupported(
+                "caption-first metadata did not contain exact upload_date"
+            )
+        data = dict(data)
+        data["_metadata_provider"] = "caption-first-innertube"
+        return data
+    except Exception as exc:
+        provider_errors.append(f"caption-first: {exc}")
+
     completed = run([*yt_video_base(), "--dump-single-json", url])
     diagnostic = completed.stderr[-2000:]
-    if diagnostic and classify_failure(diagnostic) == "access_blocked":
-        raise RuntimeError(f"access_blocked::{diagnostic}")
     if completed.returncode != 0 or not completed.stdout.strip():
         detail = diagnostic or "yt-dlp returned no metadata"
-        raise RuntimeError(f"{classify_failure(detail)}::{detail}")
+        evidence = provider_errors + [detail]
+        status = (
+            "access_blocked"
+            if any(classify_failure(item) == "access_blocked" for item in evidence)
+            else classify_failure(detail)
+        )
+        raise RuntimeError(f"{status}::{'; '.join(evidence)[-2000:]}")
     try:
         data = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"error::yt-dlp returned invalid JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise RuntimeError("error::yt-dlp returned unexpected metadata")
+    data["_metadata_provider"] = "yt-dlp"
     return data
 
 
-def load_top_comments(url: str, limit: int = 7) -> tuple[list[dict], str]:
-    args = f"youtube:skip=translated_subs;comment_sort=top;max_comments={limit},{limit},0,0,1"
-    completed = run([*yt_video_base(args), "--write-comments", "--dump-single-json", url], timeout=300)
-    if completed.returncode != 0 or not completed.stdout.strip():
-        return [], classify_failure(completed.stderr[-2000:])
-    try:
-        data = json.loads(completed.stdout)
-    except json.JSONDecodeError:
-        return [], "error"
-    comments = data.get("comments") if isinstance(data, dict) else None
-    if not isinstance(comments, list):
-        return [], "unavailable"
+def _normalized_top_comments(items: object, limit: int) -> list[dict]:
     out = []
-    for item in comments:
+    for item in items if isinstance(items, list) else []:
         if not isinstance(item, dict) or item.get("parent") not in {None, "root"}:
             continue
         text = str(item.get("text") or "").strip()
@@ -86,7 +102,41 @@ def load_top_comments(url: str, limit: int = 7) -> tuple[list[dict], str]:
         })
         if len(out) >= limit:
             break
-    return out, "ok"
+    return out
+
+
+def load_top_comments(url: str, limit: int = 7) -> tuple[list[dict], str]:
+    provider_errors = []
+    try:
+        data = innertube.comments_payload(
+            url,
+            max_comments=str(limit),
+            comment_sort="top",
+            include_replies=False,
+        )
+        return _normalized_top_comments(data.get("comments"), limit), "ok"
+    except Exception as exc:
+        provider_errors.append(f"innertube-comments: {exc}")
+
+    args = f"youtube:skip=translated_subs;comment_sort=top;max_comments={limit},{limit},0,0,1"
+    completed = run([*yt_video_base(args), "--write-comments", "--dump-single-json", url], timeout=300)
+    if completed.returncode != 0 or not completed.stdout.strip():
+        detail = completed.stderr[-2000:] or "yt-dlp returned no comment payload"
+        evidence = provider_errors + [detail]
+        status = (
+            "access_blocked"
+            if any(classify_failure(item) == "access_blocked" for item in evidence)
+            else classify_failure(detail)
+        )
+        return [], status
+    try:
+        data = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return [], "error"
+    comments = data.get("comments") if isinstance(data, dict) else None
+    if not isinstance(comments, list):
+        return [], "unavailable"
+    return _normalized_top_comments(comments, limit), "ok"
 
 
 def language_family(code: str) -> str:
@@ -200,7 +250,22 @@ def subtitle_segments(path: Path) -> list[dict]:
     return [{"text": text} for text in out]
 
 
-def download_caption(url: str, track: dict) -> tuple[str, dict]:
+def download_caption(url: str, track: dict, meta: dict | None = None) -> tuple[str, dict]:
+    provider_errors = []
+    if isinstance(meta, dict) and (
+        meta.get("_innertube_player_client")
+        or meta.get("_timedtext_direct")
+        or meta.get("_metadata_provider") == "caption-first-innertube"
+    ):
+        try:
+            transcript, info = innertube.download_caption(meta, track)
+            if transcript:
+                clean_info = dict(info or track)
+                clean_info.pop("_segments", None)
+                return transcript.rstrip() + "\n", clean_info
+        except Exception as exc:
+            provider_errors.append(f"caption-first: {exc}")
+
     with tempfile.TemporaryDirectory(prefix="transcriberen-caption-") as temp_dir:
         output_template = Path(temp_dir) / "source.%(ext)s"
         code = re.escape(track["language"])
@@ -215,7 +280,13 @@ def download_caption(url: str, track: dict) -> tuple[str, dict]:
             if text:
                 return text.rstrip() + "\n", {"language": track["language"], "kind": track["kind"], "format": subtitle_file.suffix.lstrip("."), "cue_count": len(segments)}
         detail = completed.stderr[-2000:] or "caption download produced no usable subtitle file"
-        raise RuntimeError(f"{classify_failure(detail)}::{detail}")
+        evidence = provider_errors + [detail]
+        status = (
+            "access_blocked"
+            if any(classify_failure(item) == "access_blocked" for item in evidence)
+            else classify_failure(detail)
+        )
+        raise RuntimeError(f"{status}::{'; '.join(evidence)[-2000:]}")
 
 
 def sha256_text(text: str) -> str:
@@ -237,6 +308,7 @@ def runtime_provenance() -> dict:
         "workflow_ref": os.environ.get("GITHUB_WORKFLOW_REF", "local"),
         "event": os.environ.get("GITHUB_EVENT_NAME", "local"),
         "execution_target": os.environ.get("TRANSCRIBE_EXECUTION_TARGET", "local"),
+        "provider_strategy": ["caption-first-innertube", "direct-timedtext", "yt-dlp-fallback"],
         "yt_dlp_version": tool_version("yt-dlp"),
         "deno_version": deno[1] if len(deno) >= 2 and deno[0].casefold() == "deno" else "unknown",
     }
