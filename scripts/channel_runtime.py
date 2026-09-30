@@ -222,7 +222,7 @@ def process_video(video_id: str, request: dict, access_blocked_event: threading.
             track = captions.choose_caption_track(meta, request["language"])
             if track:
                 try:
-                    transcript, caption_meta = captions.download_caption(url, track)
+                    transcript, caption_meta = captions.download_caption(url, track, meta=meta)
                     transcript_sha = captions.sha256_text(transcript)
                     transcript_status = "ok"
                     (video_dir / "transcript.txt").write_text(transcript, encoding="utf-8")
