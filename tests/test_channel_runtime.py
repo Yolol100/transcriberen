@@ -217,6 +217,37 @@ class ChannelRuntimeTests(unittest.TestCase):
         self.assertTrue(any(item['reason'] == 'deferred_after_access_block' for item in manifest['unresolved']))
         validator.validate(ROOT / 'results/result.json')
 
+    def test_comment_access_block_does_not_stop_later_caption_batches(self):
+        ids = [f"{index + 300:011d}" for index in range(14)]
+        channel.discover_channel = lambda url, limit: ({'id':'UC1','title':'Example','url':url}, ids)
+        metadata_calls = []
+
+        def metadata(url):
+            metadata_calls.append(url[-11:])
+            return self.valid_video(url[-11:])
+
+        captions.load_metadata = metadata
+        captions.choose_caption_track = lambda meta, language: {'language':'en','kind':'manual'}
+        captions.download_caption = lambda url, track, meta=None: ('hello world\n', {'language':'en','kind':'manual','format':'vtt','cue_count':1})
+        comment_calls = 0
+
+        def comments(url, limit):
+            nonlocal comment_calls
+            comment_calls += 1
+            if comment_calls == 1:
+                return [], 'access_blocked'
+            return [], 'unavailable'
+
+        captions.load_top_comments = comments
+        channel.main()
+
+        manifest = json.loads((ROOT / 'results/manifest.json').read_text())
+        self.assertEqual(len(metadata_calls), 14)
+        self.assertEqual(manifest['counts']['matched_2026'], 14)
+        self.assertEqual(manifest['counts']['captions_ok'], 14)
+        self.assertEqual(manifest['counts']['comments_unavailable'], 14)
+        validator.validate(ROOT / 'results/result.json')
+
     def test_channel_discovery_failure_still_has_valid_readback_contract(self):
         channel.discover_channel = lambda url, limit: (_ for _ in ()).throw(RuntimeError('access_blocked::blocked'))
         channel.main()
