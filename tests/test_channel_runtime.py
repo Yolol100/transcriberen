@@ -84,7 +84,7 @@ class ChannelRuntimeTests(unittest.TestCase):
 
     def use_happy_caption_stubs(self):
         captions.choose_caption_track = lambda meta, language: {'language':'en','kind':'manual'}
-        captions.download_caption = lambda url, track: ('hello world\n', {'language':'en','kind':'manual','format':'vtt','cue_count':1})
+        captions.download_caption = lambda url, track, meta=None: ('hello world\n', {'language':'en','kind':'manual','format':'vtt','cue_count':1})
         captions.load_top_comments = lambda url, limit: ([{'id':'1','author':'a','text':'top','like_count':1,'timestamp':None,'is_pinned':False,'author_is_uploader':False}], 'ok')
 
     def test_only_2026_videos_enter_manifest(self):
