@@ -56,7 +56,7 @@
     "Queue execution uses GitHub-hosted ubuntu-24.04 only; no self-hosted runner is part of the remote production path.",
     "Per-video metadata, caption and comment acquisition prefers bounded accountless public InnerTube/timedtext routes and falls back to the pinned yt-dlp runtime.",
     "The same immutable trusted runtime commit is used for request resolution and GitHub-hosted acquisition.",
-    "Explicit access_blocked evidence is terminal on GitHub-hosted execution and is never bypassed through cookies, login, proxy, CAPTCHA, PO token or another machine.",
+    "Core channel, metadata or caption access_blocked evidence is terminal on GitHub-hosted execution; comment-only access blocking remains a non-gating partial result.",
     "No cookies, login, proxy, CAPTCHA bypass, PO token or media download is used.",
     "The optional local parity route uses the same resolver/runtime/validator but is not part of queued production execution.",
     "Local cache stores validated caption text, not project truth; comments are refreshed per run.",
