@@ -18,7 +18,7 @@ Publiek YouTube-kanaal -> `/videos` -> maximaal 1000 entries inspecteren -> alle
 
 Na expliciete `access_blocked`-evidence start geen volgende video-batch met nieuwe YouTube-netwerkacquisitie.
 
-Queue-acquisitie draait uitsluitend op GitHub-hosted `ubuntu-24.04`. Per-video metadata, captions en comments gebruiken eerst de begrensde accountloze caption-first InnerTube/timedtext-route en daarna alleen de gepinde yt-dlp fallback. Expliciete `access_blocked`-evidence is terminaal en activeert geen andere machine, proxy, login of bypass. Lokaal uitvoeren blijft alleen als handmatige parity/debugroute ondersteund.
+Queue-acquisitie draait uitsluitend op GitHub-hosted `ubuntu-24.04`. Per-video metadata, captions en comments gebruiken eerst de begrensde accountloze caption-first InnerTube/timedtext-route en daarna alleen de gepinde yt-dlp fallback. Core `access_blocked`-evidence uit kanaaldiscovery, metadata of captions is terminaal en activeert geen andere machine, proxy, login of bypass. Een comment-only access block blijft non-gating en maakt het resultaat `partial`. Lokaal uitvoeren blijft alleen als handmatige parity/debugroute ondersteund.
 
 Resolve en de GitHub-hosted runtime gebruiken dezelfde immutable trusted runtime-SHA. Geen acquisitieroute voert runtimecode vanaf de transportbranch uit.
 
