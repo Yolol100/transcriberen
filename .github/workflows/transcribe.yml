@@ -166,10 +166,7 @@ jobs:
               for item in manifest.get('unresolved', [])
           )
           blocked = blocked or any(
-              isinstance(item, dict) and (
-                  item.get('transcript_status') == 'access_blocked'
-                  or item.get('comments_status') == 'access_blocked'
-              )
+              isinstance(item, dict) and item.get('transcript_status') == 'access_blocked'
               for item in manifest.get('items', [])
           )
           if result.get('status') == 'error':
