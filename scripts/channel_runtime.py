@@ -306,9 +306,9 @@ def process_video(video_id: str, request: dict, access_blocked_event: threading.
         except Exception as exc:
             comments = []
             comments_status, _ = failure_parts(exc)
-        if comments_status == "access_blocked":
-            access_blocked_event.set()
-
+        # Comments are non-gating: a comment-only access block must not stop
+        # later caption/metadata batches.
+        
     write_json(video_dir / "comments.json", {
         "status": comments_status,
         "sort": "top",
