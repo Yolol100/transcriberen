@@ -8,6 +8,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
     "toolkit-contract.json",
+    "knowledge-analysis-contract.json",
+    "knowledge_analysis/corpus.py",
+    "knowledge_analysis/review.py",
+    "scripts/knowledge_analyze.py",
+    "scripts/knowledge_source.sh",
+    "scripts/knowledge_model.sh",
+    ".github/workflows/knowledge-analysis.yml",
+    "docs/KNOWLEDGE-ANALYSIS.md",
     "scripts/resolve_request.py",
     "scripts/captions_runtime.py",
     "scripts/channel_runtime.py",
@@ -231,6 +239,66 @@ def run_checks(root: Path = ROOT) -> dict:
             failures.append("workflow still exposes old single-video runtime")
         if "workflow_dispatch:" in text or "workflow_call:" in text:
             failures.append("transcribe workflow must remain queue-triggered only")
+
+
+    # Separate supplied-corpus review must never expand the public channel
+    # acquisition contract. Validate both capabilities, not only the old one.
+    addon_contract_path = root / "knowledge-analysis-contract.json"
+    if contract_path.is_file():
+        toolkit = json.loads(contract_path.read_text(encoding="utf-8"))
+        required_addon = [{
+            "contract": "knowledge-analysis-contract.json",
+            "capability_id": "github-hosted-local-youtube-knowledge-review",
+            "scope": "analyze_existing_supplied_corpora_only",
+            "network_acquisition_policy_unchanged": True,
+            "automatic_knowledge_promotion": False,
+        }]
+        if toolkit.get("separate_evidence_only_capabilities") != required_addon:
+            failures.append("separate knowledge review capability mapping missing or drifted")
+    if addon_contract_path.is_file():
+        review = json.loads(addon_contract_path.read_text(encoding="utf-8"))
+        for key, value in {
+            "capability_id": "github-hosted-local-youtube-knowledge-review",
+            "repository": "Yolol100/transcriberen",
+            "scope": "evidence_only_semantic_review_of_existing_corpora",
+            "batch_size": 500,
+            "slice_size": 20,
+            "requires_user_api_key": False,
+            "requires_added_account": False,
+            "requires_mcp": False,
+            "requires_self_hosted_runner": False,
+            "uses_external_inference": False,
+        }.items():
+            if review.get(key) != value:
+                failures.append(f"knowledge review contract drift: {key}")
+        pins = {
+            "6a47856d08ecc4030b2fa8b8bf761c96d142d689567f69a0f75e42de430dc34c",
+            "d2387ca2dbfee2ffabce7120d3770dadca0b293052bc2f0e138fdc940d9bc7b5",
+        }
+        download_script = root / "scripts/knowledge_model.sh"
+        model_contents = download_script.read_text(encoding="utf-8") if download_script.is_file() else ""
+        for pin in pins:
+            if pin not in model_contents or pin not in json.dumps(review):
+                failures.append("knowledge review model/runtime SHA pin mismatch")
+        if "--host 127.0.0.1" not in model_contents:
+            failures.append("knowledge review model must run on loopback only")
+    knowledge_workflow = root / ".github/workflows/knowledge-analysis.yml"
+    if knowledge_workflow.is_file():
+        review_text = knowledge_workflow.read_text(encoding="utf-8")
+        for marker, description in (
+            ("workflow_dispatch:", "must be manually triggered"),
+            ("runs-on: ubuntu-24.04", "must run on GitHub-hosted Linux"),
+            ("scripts/knowledge_source.sh", "must use repository source boundary"),
+            ("scripts/knowledge_model.sh", "must use local pinned model"),
+            ("scripts/knowledge_analyze.py", "must use bounded review script"),
+            ("Import only this slice's prior evidence", "must isolate resumed evidence"),
+            ("model-canary:", "must have a live-model regression canary"),
+        ):
+            if marker not in review_text:
+                failures.append("knowledge review workflow " + description)
+        for forbidden in ("OPENAI_API_KEY", "models: read", "runs-on: [self-hosted"):
+            if forbidden in review_text:
+                failures.append("knowledge review forbidden capability: " + forbidden)
 
     return {"ok": not failures, "failures": failures, "required_count": len(REQUIRED), "forbidden_count": len(FORBIDDEN)}
 

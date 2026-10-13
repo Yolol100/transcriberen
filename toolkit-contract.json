@@ -61,5 +61,14 @@
     "The optional local parity route uses the same resolver/runtime/validator but is not part of queued production execution.",
     "Local cache stores validated caption text, not project truth; comments are refreshed per run.",
     "Project identity, Skill routing and promotion of transcript knowledge are owned outside this repository."
+  ],
+  "separate_evidence_only_capabilities": [
+    {
+      "contract": "knowledge-analysis-contract.json",
+      "capability_id": "github-hosted-local-youtube-knowledge-review",
+      "scope": "analyze_existing_supplied_corpora_only",
+      "network_acquisition_policy_unchanged": true,
+      "automatic_knowledge_promotion": false
+    }
   ]
 }

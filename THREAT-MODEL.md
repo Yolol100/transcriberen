@@ -42,3 +42,21 @@
 ## Niet opgelost door repositorycode
 
 YouTube kan publieke endpoints voor datacenter-IP's wijzigen of blokkeren. De runtime behandelt dat als een expliciete externe blokkade en voegt geen cookies, proxy, account, CAPTCHA- of tokenbypass toe. GitHub Rulesets, repositoryrechten en Actions-beleid blijven repository-administratieverantwoordelijkheden.
+
+## Nieuwe, strikt afgebakende review-capability
+
+`knowledge-analysis-contract.json` definieert uitsluitend een aanvullende read-only evidence-analyse van vooraf bestaande archieven op GitHub-hosted Actions. Het oorspronkelijke kanaal-2026-/1000-input-/top-7-beleid blijft van toepassing op **nieuwe netwerk-acquisitie**, niet op historische corpusonderzoeken.
+
+| Risico | Maatregel / bewijsgrens |
+| --- | --- |
+| Prompt injection in captions/comments | Broninhoud is uitsluitend data; instructies afkomstig uit de bron mogen nooit toolactie of promotie starten |
+| Modelgewichten/binary supply chain | Gepinde download-URL's, SHA-256 voor beiden, fail-closed bij download- of digestfout; lokaal loopbackmodel |
+| Onbedoelde externe data-uitstroom | Alleen localhost-inferentie; geen OpenAI/GitHub Models/derde AI-API of gebruiker-provided secret |
+| ZIP-slip, compressiebom, enorme JSONL | Weigering van onveilige ZIP-members, streaminglimiet op geneste BZ2-expansie, maximumrecordgrootte en intakecount |
+| Onvolledige oorspronkelijke kanaalrun | Bronreceipt blijft `partial`/`access_blocked` met unresolved/video-aantallen, nooit groen afgeleid van alleen aanwezige bestanden |
+| Stale of vreemde hervatbestanden | Filter op exacte geselecteerde video-ID's; bron-/comments-/transcript-/model-/policyhash vereist voor veilig hergebruik |
+| Hallucinaties, creatorreclame, onjuiste bronidentiteit | Strikte beperkte JSON, echte exacte citaatankers, leeftijd/provenance en onzekerheid; menselijke controle van elke materiele bronupdate |
+| Auteursrechten/privacy in publieke repository | Geen volledige historische Library-corpus op main; geen automatisch publiceren van release-assets; compact artefact met korte gecontroleerde evidencecitaten |
+| Verwarring tussen AI-scan en afgeronde inhoudsaudit | `ai_reviewed_pending_independent_verification` is alleen modelreview. Geen claim van onafhankelijke bronverificatie, QA of beleidsactivatie |
+
+Alle afzonderlijke risico's worden bewaakt door `scripts/doctor.py`, `tests/test_knowledge_analysis.py`, `tests/test_doctor.py` en de bestaande GitHub-CI.

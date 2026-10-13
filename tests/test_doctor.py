@@ -87,5 +87,18 @@ class DoctorTests(unittest.TestCase):
             td.cleanup()
 
 
+    def test_knowledge_review_capability_drift_is_detected(self):
+        td, root = self.copied_tree()
+        try:
+            path = root / 'knowledge-analysis-contract.json'
+            data = json.loads(path.read_text(encoding='utf-8'))
+            data['uses_external_inference'] = True
+            path.write_text(json.dumps(data), encoding='utf-8')
+            result = m.run_checks(root)
+            self.assertFalse(result['ok'])
+            self.assertTrue(any('knowledge review contract drift' in err for err in result['failures']))
+        finally:
+            td.cleanup()
+
 if __name__ == '__main__':
     unittest.main()
