@@ -145,7 +145,7 @@ Before accepting a real owner-authorized corpus run:
    SHA-256s. Do not silently replace project facts with constants from this
    repository. A public GitHub release of third-party transcripts/comments
    requires established redistribution rights; without one accepted GitHub
-   source keep the status \`BLOCKED_SOURCE\` and **do not dispatch**.
+   source keep the status `BLOCKED_SOURCE` and **do not dispatch**.
 2. Match each workflow run to the immutable trusted main SHA, fixed model
    and inference engine digests, correct authorized source identifier and
    source receipt. Validate *all* expected logical 500-video batches and
@@ -157,12 +157,12 @@ Before accepting a real owner-authorized corpus run:
    per span, bounded evidence offsets, preserved source integrity statuses
    and explicit partial/blocked/missing data. The phase-4 ledger now
    cross-checks saved completed chunks and their claim counters; its
-   \`source_quote_rechecked_against_raw_transcript=false\` remains accurate.
+   `source_quote_rechecked_against_raw_transcript=false` remains accurate.
    A claim cannot be marked independently verified on that basis alone.
 4. Verify unique source IDs, model/route versions, deduplication, no
    misattributed community comments and no missing chunks. Reconcile
    claim categories with the current Drive owner source and official
-   primary evidence. \`UPDATE\`, \`ALREADY_COVERED\` and \`REJECTED\`
+   primary evidence. `UPDATE`, `ALREADY_COVERED` and `REJECTED`
    in GitHub remain *proposed* dispositions, not domain acceptances.
 5. A suitable specialist owner must independently approve each proposed
    project-source change using live source hashes and rollback/readback.
@@ -173,16 +173,16 @@ Before accepting a real owner-authorized corpus run:
    CodeQL and the PR synthetic local-Qwen3 end-to-end canary. Distinguish
    PR canary evidence from actual reviewed-corpus production receipts.
 
-**Release decision:** \`CODE_QA_PASS\` is allowed only for the implementation
-with proven checks. \`FULL_CORPUS_ACCEPTED\` requires every source, run,
+**Release decision:** `CODE_QA_PASS` is allowed only for the implementation
+with proven checks. `FULL_CORPUS_ACCEPTED` requires every source, run,
 video, model and owner-check above. A missing right or GitHub artifact,
 a count shortfall, partial comments/captions, unconfirmed source hashes or
-missing independent approval yields \`NO_GO\` / \`BLOCKED_SOURCE\`
+missing independent approval yields `NO_GO` / `BLOCKED_SOURCE`
 for the affected completeness or knowledge-promotion claim.
 
 The repository is public and the current workflow uses same-repo artifacts
 or explicitly authorized release assets only. GitHub administration rules
 such as force-push/deletion bypass and review protection require suitable
-GitHub admin readback; a \`protected=true\` branch bit or green Actions
+GitHub admin readback; a `protected=true` branch bit or green Actions
 cannot close the open administrative-governance issue. Never loosen branch
 protection or publish rights-restricted archive bytes as a workaround.
