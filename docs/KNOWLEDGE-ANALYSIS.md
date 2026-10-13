@@ -16,7 +16,7 @@ In `review` mode the GitHub-hosted runner downloads SHA-256 verified `llama.cpp`
 
 1. Open **Actions → Corpus Knowledge Review → Run workflow** after this branch is merged to `main`.
 2. For `source_kind=run`, enter a prior same-repo **Transcribe Public Source run ID**, whose `transcription-result-*` artifact contains `channel-corpus.zip`. The source loader first requires the exact `.github/workflows/transcribe.yml` workflow path, repository identity, `push` event on `runtime-requests`, and a completed, successful run. Failed/cancelled/untrusted runs must not be used as validated source evidence, even when artifacts remain downloadable.
-3. For existing v15 Library shard files, `source_kind=release` accepts same-repo release assets matching `YouTube_Kennisbron_Master.part-*.zip`. The private ChatGPT Library cannot be fetched from a GitHub-hosted runner without an additional integration. **Do not upload third-party copyrighted or private transcripts to a public release without redistribution rights.** No source artifact/release means `BLOCKED_SOURCE`.
+3. For existing v15 Library shards, the `release` source mode accepts either one authorized `YouTube_Kennisbron_Bundle.zip` (the master and every shard) or the original individually supplied `YouTube_Kennisbron_Master.part-*.zip` release assets. The master ZIP alone contains index metadata, not the transcripts. The private ChatGPT Library cannot be fetched from a GitHub-hosted runner without an additional integration. **Do not upload third-party copyrighted or private transcripts to a public release without redistribution rights.** No source artifact/release means `BLOCKED_SOURCE`.
    When using a release, publish the matching authorized `YouTube_Kennisbron_Master.zip` metadata index as well, and set `master_sha256` to its verified SHA-256. The reviewer requires an exact ID match between all supplied shards and this pinned index, and uses its corrected v15 routes/authority. A missing index, changed SHA, conflicting video identity or missing comment fails closed. Never publish private/copyrighted files without authorization.
    Before any historical review starts, the validator also reads `YouTube_Kennisbron_Shards_2026-10-03.json` from that SHA-pinned master and requires every declared shard ZIP to have the exact filename, file size and SHA-256, with no missing/extra shards and a manifest record total equal to the routing index. Existing same-repo channel-run artifacts continue to use their original receipt validator. These guards do not authorize republication or count as an AI review.
 4. Choose `batch=1` for the first 500 videos. `scope=inventory` only checks archive membership; it **does not** review semantics. Choose `scope=slice`, `slice=0` for 20 videos or `scope=batch` for all 500 split across 25 slices. The last batch has fewer slices automatically.
@@ -186,3 +186,55 @@ such as force-push/deletion bypass and review protection require suitable
 GitHub admin readback; a `protected=true` branch bit or green Actions
 cannot close the open administrative-governance issue. Never loosen branch
 protection or publish rights-restricted archive bytes as a workaround.
+
+
+## Owner-supplied ZIP from a ChatGPT conversation
+
+**No online YouTube acquisition occurs in this workflow.** It reads
+only already-stored transcripts and saved comments inside an owner ZIP.
+A supplied metadata-only master is insufficient for a complete review.
+
+A user ZIP attached to ChatGPT is **not automatically visible to
+GitHub Actions**. The linked GitHub tools have no direct private
+binary-upload bridge for an attachment. Public GitHub release assets and
+public workflow artifacts must not be used for archives that are private
+or not authorized for redistribution. A privately authorized source handoff
+is required before actually running the GitHub-hosted model; no actual
+corpus processing should be claimed from a ChatGPT upload alone.
+
+One recognized owner bundle named YouTube_Kennisbron_Bundle.zip contains
+root-level YouTube_Kennisbron_Master.zip and every
+YouTube_Kennisbron_Master.part-NN.zip named in the master shard manifest.
+The original trusted successful channel-corpus.zip run source remains
+supported. The pinned master SHA-256 must be independently confirmed.
+Other arbitrary ZIP layouts require format validation before acceptance.
+
+For private, nonpublishing preflight of a supplied owner bundle:
+
+~~~bash
+python scripts/knowledge_bundle.py --bundle /private/input/YouTube_Kennisbron_Bundle.zip --dest /private/work/validated --master-sha256 VERIFIED_MASTER_SHA256
+~~~
+
+The preflight rejects unsafe members, unexpected files, absent or tampered
+shards, invalid master hashes, conflicting video metadata and mismatched
+counts. It generates INPUT-FILES.txt and a small INPUT-RECEIPT.json with
+video count, shard count, batch count and zero AI-reviewed videos; no
+raw transcript is copied into the receipt.
+
+Once an authorized source is available to the GitHub review workflow,
+the existing Qwen3 model processes each video in bounded transcript
+and saved-comment chunks. The logical batch size remains exactly 500
+videos, with 20-video retryable slices (up to four slices concurrently).
+For the current 18,875-video master, that means 38 batches and a final
+375-video batch. Missing, partial or blocked source material stays
+explicit. Inventory completion is NOT full model reading.
+
+The phase-4 candidate output uses UPDATE, ALREADY_COVERED, REJECTED,
+or NEEDS_VERIFICATION. Every new claim initially stays
+NEEDS_VERIFICATION until compared with the live project sources,
+specialist-Skill rules and current primary documentation and then
+accepted by the responsible owner. The system never automatically
+modifies project sources or Skills from video-derived claims.
+
+The separate BLOCKED_PROVIDER state concerns new public YouTube
+acquisition only, not offline analysis of already supplied archives.

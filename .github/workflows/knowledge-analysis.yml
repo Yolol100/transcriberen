@@ -8,6 +8,8 @@ on:
       - scripts/knowledge_model.sh
       - scripts/knowledge_source.sh
       - scripts/knowledge_analyze.py
+      - scripts/knowledge_bundle.py
+      - tests/test_knowledge_bundle.py
       - tests/test_knowledge_analysis.py
       - tests/test_knowledge_volume.py
       - tests/test_knowledge_phase4.py
@@ -161,7 +163,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_KIND: ${{ inputs.source_kind }}
           SOURCE_IDENTIFIER: ${{ inputs.source_identifier }}
-        run: bash scripts/knowledge_source.sh "$SOURCE_KIND" "$SOURCE_IDENTIFIER" "$RUNNER_TEMP/corpus"
+          MASTER_SHA: ${{ inputs.master_sha256 }}
+        run: bash scripts/knowledge_source.sh "$SOURCE_KIND" "$SOURCE_IDENTIFIER" "$RUNNER_TEMP/corpus" "$MASTER_SHA"
       - name: Validate inventory and plan slices
         id: plan
         env:
@@ -235,7 +238,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_KIND: ${{ inputs.source_kind }}
           SOURCE_IDENTIFIER: ${{ inputs.source_identifier }}
-        run: bash scripts/knowledge_source.sh "$SOURCE_KIND" "$SOURCE_IDENTIFIER" "$RUNNER_TEMP/corpus"
+          MASTER_SHA: ${{ inputs.master_sha256 }}
+        run: bash scripts/knowledge_source.sh "$SOURCE_KIND" "$SOURCE_IDENTIFIER" "$RUNNER_TEMP/corpus" "$MASTER_SHA"
       - name: Confirm no corpus mutation since inventory stage
         env:
           EXPECTED: ${{ needs.inventory.outputs.expected_sources }}
