@@ -176,8 +176,155 @@ class CorpusTests(unittest.TestCase):
             self.assertTrue(all("evidence_start" in c for c in first["claims"]))
             self.assertFalse(first["auto_promoted"])
             n = len(fake.calls)
-            self.assertTrue(review_video(video, model=fake, model_sha256="f"*64, out_dir=Path(d))["resumed"])
+            self.assertTrue(review_video(video, model=fake, model_sha256="f"*64, out_dir=Path(d), chunk_size=510)["resumed"])
             self.assertEqual(len(fake.calls), n)
+
+    def test_changed_chunk_size_forces_new_review(self):
+        t = "Important source context about item categories and test cases. " * 20
+        video = Video("ABCDEFGHIJK", "A", "B", "", "", "unknown", (), t,
+                      (), sha256(t), "ok", "fixture")
+        with tempfile.TemporaryDirectory() as d:
+            fake = FakeModel()
+            review_video(video, model=fake, model_sha256="a"*64,
+                         out_dir=Path(d), chunk_size=510)
+            prev = len(fake.calls)
+            result = review_video(video, model=fake, model_sha256="a"*64,
+                                  out_dir=Path(d), chunk_size=560)
+            self.assertEqual(result["status"], STATUS_COMPLETE)
+            self.assertFalse(result.get("resumed", False))
+            self.assertGreater(len(fake.calls), prev)
+
+    def test_imported_tampered_completed_result_cannot_bypass_review(self):
+        t = "Relevant source evidence about accessible controls. " * 15
+        video = Video("ABCDEFGHIJK", "A", "B", "", "", "unknown", (), t,
+                      (), sha256(t), "ok", "fixture")
+        with tempfile.TemporaryDirectory() as d:
+            fake = FakeModel()
+            original = review_video(video, model=fake, model_sha256="a"*64,
+                                    out_dir=Path(d), chunk_size=510)
+            path = Path(d) / "videos" / "ABCDEFGHIJK.json"
+            original["chunks"] = []
+            path.write_text(json.dumps(original))
+            prev = len(fake.calls)
+            result = review_video(video, model=fake, model_sha256="a"*64,
+                                  out_dir=Path(d), chunk_size=510)
+            self.assertFalse(result.get("resumed", False))
+            self.assertEqual(result["status"], STATUS_COMPLETE)
+            self.assertGreater(len(fake.calls), prev)
+
+    def test_imported_claim_without_valid_quote_is_rejected(self):
+        t = "Significant and verifiable source text about form error handling. " * 20
+        video = Video("ABCDEFGHIJK", "A", "B", "", "", "unknown", (), t,
+                      (), sha256(t), "ok", "fixture")
+        with tempfile.TemporaryDirectory() as d:
+            fake = FakeModel()
+            original = review_video(video, model=fake, model_sha256="a"*64,
+                                    out_dir=Path(d), chunk_size=510)
+            path = Path(d) / "videos" / "ABCDEFGHIJK.json"
+            original["claims"][0]["quote"] = "invented evidence"
+            path.write_text(json.dumps(original))
+            prev = len(fake.calls)
+            result = review_video(video, model=fake, model_sha256="a"*64,
+                                  out_dir=Path(d), chunk_size=510)
+            self.assertFalse(result.get("resumed", False))
+            self.assertEqual(result["status"], STATUS_COMPLETE)
+            self.assertGreater(len(fake.calls), prev)
+
+    def test_imported_partial_checkpoint_cannot_skip_unprocessed_source(self):
+        t = "Verifiable long transcript with advice about keyboard accessible form fields. " * 30
+        video = Video("ABCDEFGHIJK", "A", "B", "", "", "unknown", (), t,
+                      ("Helpful but questionable comment text about checkout forms",),
+                      sha256(t), "ok", "fixture")
+        with tempfile.TemporaryDirectory() as d:
+            fake = FakeModel()
+            initial = review_video(video, model=fake, model_sha256="a"*64,
+                                   out_dir=Path(d), chunk_size=510)
+            path = Path(d)/"videos"/"ABCDEFGHIJK.json"
+            # A partial artifact claims progress from another offset; a bare
+            # matching source signature is not sufficient to skip work.
+            initial["status"] = "blocked_time_budget"
+            initial["chunks"][0]["start"] += 1
+            path.write_text(json.dumps(initial))
+            fresh = FakeModel()
+            actual = review_video(video, model=fresh, model_sha256="a"*64,
+                                  out_dir=Path(d), chunk_size=510)
+            self.assertEqual(actual["status"], STATUS_COMPLETE)
+            self.assertEqual(len(fresh.calls), len(actual["chunks"]))
+            self.assertNotIn("resumed", actual)
+
+    def test_missing_saved_claim_for_processed_chunk_forces_rereview(self):
+        t = "A concrete explanation of accessible mobile controls for real users. " * 24
+        video = Video("ABCDEFGHIJK", "A", "B", "", "", "unknown", (), t,
+                      (), sha256(t), "ok", "fixture")
+        with tempfile.TemporaryDirectory() as d:
+            result = review_video(video, model=FakeModel(), model_sha256="c"*64,
+                                  out_dir=Path(d), chunk_size=510)
+            self.assertGreater(len(result["claims"]), 0)
+            result["claims"].pop()
+            path = Path(d)/"videos"/"ABCDEFGHIJK.json"
+            path.write_text(json.dumps(result))
+            model = FakeModel()
+            actual = review_video(video, model=model, model_sha256="c"*64,
+                                  out_dir=Path(d), chunk_size=510)
+            self.assertEqual(actual["status"], STATUS_COMPLETE)
+            self.assertGreater(len(model.calls), 0)
+            self.assertNotIn("resumed", actual)
+
+    def test_forged_completion_flags_force_new_review(self):
+        t = "Some facts about navigation keyboard and touch devices. " * 20
+        video = Video("ABCDEFGHIJK", "A", "B", "", "", "unknown", (), t,
+                      (), sha256(t), "ok", "fixture")
+        with tempfile.TemporaryDirectory() as d:
+            record = review_video(video, model=FakeModel(), model_sha256="d"*64,
+                                  out_dir=Path(d), chunk_size=510)
+            record["comments_read_completely"] = False
+            path = Path(d)/"videos"/"ABCDEFGHIJK.json"
+            path.write_text(json.dumps(record))
+            fake = FakeModel()
+            rerun = review_video(video, model=fake, model_sha256="d"*64,
+                                 out_dir=Path(d), chunk_size=510)
+            self.assertFalse(rerun.get("resumed", False))
+            self.assertGreater(len(fake.calls), 0)
+
+    def test_changed_metadata_invalidates_previous_inference(self):
+        t = "Explain concrete consent categories and users. " * 20
+        video = Video("ABCDEFGHIJK", "Original", "Original Channel", "20261001", "", "unknown",
+                      ("seo",), t, (), sha256(t), "ok", "fixture")
+        with tempfile.TemporaryDirectory() as d:
+            model = FakeModel()
+            review_video(video, model=model, model_sha256="a"*64,
+                         out_dir=Path(d), chunk_size=510)
+            prior_count = len(model.calls)
+            revised = Video(**{**video.__dict__, "title": "Changed Source Title"})
+            result = review_video(revised, model=model, model_sha256="a"*64,
+                                  out_dir=Path(d), chunk_size=510)
+            self.assertEqual(result["status"], STATUS_COMPLETE)
+            self.assertGreater(len(model.calls), prior_count)
+            self.assertFalse(result.get("resumed", False))
+
+    def test_malformed_checkpoint_list_is_not_accepted(self):
+        t = "Description of accessibility and validation patterns. " * 20
+        video = Video("ABCDEFGHIJK", "A", "B", "", "", "unknown", (), t,
+                      (), sha256(t), "ok", "fixture")
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d)/"videos"/"ABCDEFGHIJK.json"
+            path.parent.mkdir(parents=True)
+            path.write_text("[]")
+            actual = review_video(video, model=FakeModel(), model_sha256="a"*64,
+                                  out_dir=Path(d), chunk_size=510)
+            self.assertEqual(actual["status"], STATUS_COMPLETE)
+
+    def test_untrusted_model_malformed_owner_and_boolean_fail_safe(self):
+        from knowledge_analysis.review import _clean_claims
+        piece = "A specific user-facing contrast instruction should be verified."
+        candidate = {"claims":[{"claim":"Contrast statements require verification",
+                                "quote":piece[:30], "owner":["seo"],
+                                "kind":[], "needs_current_verification":"false"}]}
+        claims, rejected = _clean_claims(candidate, piece, 0, "transcript")
+        self.assertEqual(rejected, 0)
+        self.assertEqual(claims[0]["owner_candidate"], "unknown")
+        self.assertEqual(claims[0]["kind"], "unknown")
+        self.assertTrue(claims[0]["needs_current_verification"])
 
     def test_errors_do_not_mark_complete_and_retry(self):
         t = "Enough explanatory text for evidence review! " * 15

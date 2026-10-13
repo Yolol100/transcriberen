@@ -9,7 +9,7 @@ from urllib import request, error
 
 from .corpus import Video, sha256
 
-POLICY_VERSION = "knowledge-review-v2"
+POLICY_VERSION = "knowledge-review-v4"
 OWNERS = {"seo", "design", "elementor", "wordpressqualityarchitect", "website-qa-checklist", "leads", "vacature-search", "transcribeer"}
 STATUS_COMPLETE = "ai_reviewed_pending_independent_verification"
 STATUS_SOURCE_WARNING = "ai_reviewed_unverified_legacy_source_hash"
@@ -45,14 +45,20 @@ def split_exact(text: str, size: int = 5600) -> list[tuple[int, int, str]]:
     return pieces
 
 
-def signature(video: Video, model_sha256: str) -> str:
+def signature(video: Video, model_sha256: str, chunk_size: int = 5600) -> str:
     payload = json.dumps({
         "policy": POLICY_VERSION, "video": video.video_id,
         "transcript_sha256": video.transcript_sha256,
         "transcript_hash_claim": video.transcript_hash_claim,
         "transcript_hash_status": video.transcript_hash_status,
         "comments_sha256": sha256(json.dumps(video.comments, ensure_ascii=False)),
-        "model_sha256": model_sha256,
+        "model_sha256": model_sha256, "chunk_size": chunk_size,
+        # The model sees these fields; changing them invalidates prior inference.
+        "model_context": {
+            "title": video.title, "channel": video.channel,
+            "published_date": video.published_date, "authority": video.authority,
+            "route_candidates": video.routes, "provenance": video.provenance,
+        },
     }, ensure_ascii=False, sort_keys=True)
     return sha256(payload)
 
@@ -124,15 +130,17 @@ def _clean_claims(data: dict, chunk: str, start: int, source: str) -> tuple[list
             rejected += 1
             continue
         owner = c.get("owner")
-        if owner not in OWNERS:
+        if not isinstance(owner, str) or owner not in OWNERS:
             owner = "unknown"
-        kind = c.get("kind") if c.get("kind") in {"fact", "pattern", "criticism", "question", "promotion"} else "unknown"
+        raw_kind = c.get("kind")
+        kind = raw_kind if isinstance(raw_kind, str) and raw_kind in {"fact", "pattern", "criticism", "question", "promotion"} else "unknown"
         quote_at = chunk.index(quote)
         claims.append({
             "claim": claim.strip(), "quote": quote,
             "evidence_start": start + quote_at, "evidence_end": start + quote_at + len(quote),
             "source": source, "owner_candidate": owner, "kind": kind,
-            "needs_current_verification": bool(c.get("needs_current_verification", True)),
+            # Ambiguous model strings such as "false" must not skip independent verification.
+            "needs_current_verification": c.get("needs_current_verification") is not False,
             "evidence_only": True,
         })
     return claims, rejected
@@ -145,27 +153,113 @@ def _atomic_json(path: Path, data: dict) -> None:
     temp.replace(path)
 
 
+def _valid_prior(prior: dict, tasks: list[tuple], *, expected_status: str) -> bool:
+    """Only reuse exact previously processed text spans and still-anchored claims.
+
+    Artifacts can be downloaded from prior runs. Neither a matching claimed
+    signature nor an asserted `complete` flag alone proves actual coverage.
+    """
+    if not isinstance(prior, dict):
+        return False
+    permitted = {"review_in_progress", "blocked_local_model", "blocked_time_budget",
+                 STATUS_COMPLETE, STATUS_SOURCE_WARNING, STATUS_NO_TRANSCRIPT_COMMENTS,
+                 "no_transcript"}
+    status = prior.get("status")
+    if status not in permitted or not isinstance(prior.get("chunks"), list) or not isinstance(prior.get("claims"), list):
+        return False
+    # These are not authorizations. A resumed claim must remain evidence_only.
+    if (prior.get("auto_promoted") is not False or prior.get("human_qa_approved") is not False
+            or prior.get("project_source_compared") is not False
+            or prior.get("primary_sources_verified") is not False):
+        return False
+    complete = status in {STATUS_COMPLETE, STATUS_SOURCE_WARNING,
+                          STATUS_NO_TRANSCRIPT_COMMENTS, "no_transcript"}
+    if complete and status != expected_status:
+        return False
+    expected = {(source, idx, start, end, sha256(text)): text
+                for source, idx, start, end, text in tasks}
+    seen = set()
+    expected_claim_counts = {}
+    for item in prior["chunks"]:
+        if not isinstance(item, dict) or item.get("model_result") != "parsed_and_checked":
+            return False
+        if type(item.get("start")) is not int or type(item.get("end")) is not int:
+            return False
+        key = (item.get("source"), item.get("comment_index"), item["start"],
+               item["end"], item.get("sha256"))
+        if key not in expected or key in seen:
+            return False
+        if type(item.get("valid_claims")) is not int or item["valid_claims"] < 0:
+            return False
+        if type(item.get("rejected_claims")) is not int or item["rejected_claims"] < 0:
+            return False
+        seen.add(key)
+        expected_claim_counts[key] = item["valid_claims"]
+    actual_claim_counts = {key: 0 for key in seen}
+    for item in prior["claims"]:
+        if (not isinstance(item, dict) or not isinstance(item.get("quote"), str)
+                or not isinstance(item.get("claim"), str) or item.get("evidence_only") is not True):
+            return False
+        source, idx = item.get("source"), item.get("comment_index")
+        if source not in {"transcript", "comment"}:
+            return False
+        if source == "transcript":
+            idx = None
+        elif type(idx) is not int or idx < 0 or item.get("creator_attribution") is not False:
+            return False
+        start, end = item.get("evidence_start"), item.get("evidence_end")
+        if type(start) is not int or type(end) is not int:
+            return False
+        if not (0 < len(item["quote"]) <= 110 and end - start == len(item["quote"])):
+            return False
+        matches = [key for key in seen if source == key[0] and idx == key[1]
+                   and key[2] <= start and end <= key[3]
+                   and expected[key][start - key[2]:end - key[2]] == item["quote"]]
+        if len(matches) != 1:
+            return False
+        actual_claim_counts[matches[0]] += 1
+    if any(actual_claim_counts[key] != expected_claim_counts[key] for key in seen):
+        return False
+    if complete and seen != set(expected):
+        return False
+    if complete and status != "no_transcript":
+        if prior.get("transcript_read_completely") is not True or prior.get("comments_read_completely") is not True:
+            return False
+    return True
+
+
 def review_video(video: Video, *, model: LocalModel, model_sha256: str,
                  out_dir: Path, chunk_size: int = 5600, max_attempts: int = 2,
                  deadline: float | None = None) -> dict:
     """Local inference over ALL transcript and comment chunks or explicit partial failure."""
     if not re.fullmatch(r"[0-9a-f]{64}", model_sha256):
         raise ValueError("model sha256 missing or invalid")
+    if chunk_size < 250:
+        raise ValueError("chunk size too small")
     out_path = Path(out_dir) / "videos" / (video.video_id + ".json")
-    sig = signature(video, model_sha256)
-    prior = None
-    if out_path.exists():
-        try:
-            prior = json.loads(out_path.read_text(encoding="utf-8"))
-            if prior.get("signature") == sig and prior.get("status") in {STATUS_COMPLETE, STATUS_SOURCE_WARNING, STATUS_NO_TRANSCRIPT_COMMENTS, "no_transcript"}:
-                return {**prior, "resumed": True}
-        except (ValueError, OSError):
-            pass
+    sig = signature(video, model_sha256, chunk_size)
     transcript_chunks = split_exact(video.transcript, chunk_size)
     comment_chunks = []
     for index, comment in enumerate(video.comments):
         for start, end, portion in split_exact(comment, chunk_size):
             comment_chunks.append((index, start, end, portion))
+    tasks = [("transcript", None, s, e, t) for s, e, t in transcript_chunks]
+    tasks += [("comment", i, s, e, t) for i, s, e, t in comment_chunks]
+    prior = None
+    if out_path.exists():
+        try:
+            candidate = json.loads(out_path.read_text(encoding="utf-8"))
+            expected_status = ("no_transcript" if not tasks else
+                               STATUS_NO_TRANSCRIPT_COMMENTS if not video.transcript else
+                               STATUS_SOURCE_WARNING if video.transcript_hash_status != "match" else
+                               STATUS_COMPLETE)
+            if (isinstance(candidate, dict) and candidate.get("signature") == sig
+                    and _valid_prior(candidate, tasks, expected_status=expected_status)):
+                prior = candidate
+                if candidate.get("status") == expected_status:
+                    return {**candidate, "resumed": True}
+        except (ValueError, OSError, TypeError, AttributeError):
+            pass
     record = {
         "schema_version": "1.0", "policy_version": POLICY_VERSION,
         "signature": sig, "video_id": video.video_id, "title": video.title,
@@ -195,8 +289,6 @@ def review_video(video: Video, *, model: LocalModel, model_sha256: str,
         _atomic_json(out_path, record)
         return record
     metadata = {"video_id": video.video_id, "title": video.title, "published_date": video.published_date}
-    tasks = [("transcript", None, s, e, t) for s, e, t in transcript_chunks]
-    tasks += [("comment", i, s, e, t) for i, s, e, t in comment_chunks]
     done = {(c.get("source"), c.get("comment_index"), c.get("start"), c.get("end"), c.get("sha256"))
             for c in record["chunks"] if c.get("model_result") == "parsed_and_checked"}
     try:
