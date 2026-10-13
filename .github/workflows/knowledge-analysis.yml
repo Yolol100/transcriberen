@@ -9,6 +9,8 @@ on:
       - scripts/knowledge_source.sh
       - scripts/knowledge_analyze.py
       - tests/test_knowledge_analysis.py
+      - tests/test_knowledge_phase4.py
+      - scripts/knowledge_phase4.py
       - knowledge-analysis-contract.json
       - .github/workflows/knowledge-analysis.yml
   workflow_dispatch:
@@ -123,6 +125,20 @@ jobs:
           assert result['auto_promoted'] is False and result['human_qa_approved'] is False
           print('End-to-end archive -> local AI -> JSON progress: PASS')
           PY_ASSERT
+      - name: Confirm phase-4 claims remain evidence-only and unapproved
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/knowledge_phase4.py --reviews-dir "$RUNNER_TEMP/e2e/videos" --out "$RUNNER_TEMP/e2e/phase4.json"
+          python - <<'PY_PHASE4'
+          import json, os, pathlib
+          report=json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'e2e/phase4.json').read_text())
+          assert report['human_qa_approved'] is False
+          assert report['auto_promoted'] is False
+          assert report['status']=='requires_external_project_source_readback_and_owner_qa'
+          assert all(c['proposed_category']=='NEEDS_VERIFICATION' and not c['auto_promoted'] for c in report['claims'])
+          print('Synthetic local Qwen review -> phase-4 no-promotion ledger: PASS')
+          PY_PHASE4
   inventory:
     if: github.event_name == 'workflow_dispatch' && github.repository == 'Yolol100/transcriberen' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
@@ -314,6 +330,12 @@ jobs:
             master_args=(--master-routing "$RUNNER_TEMP/corpus/YouTube_Kennisbron_Master.zip" --master-sha256 "$MASTER_SHA")
           fi
           python scripts/knowledge_analyze.py --source "${src[@]}" --batch "$BATCH" --slice "$SLICE" --slice-size 20 --mode review "${master_args[@]}" --model-path "$RUNNER_TEMP/inference/model/model.gguf" --time-budget-seconds 16200 --output-dir "$RUNNER_TEMP/results"
+      - name: Compile reviewer-only phase-4 candidate ledger
+        if: steps.analyze.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/knowledge_phase4.py --reviews-dir "$RUNNER_TEMP/results/videos" --out "$RUNNER_TEMP/results/phase4-proposals.json"
       - name: Upload compact evidence, never raw source transcripts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
