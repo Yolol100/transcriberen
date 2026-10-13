@@ -14,7 +14,7 @@ import zipfile
 
 from .corpus import CorpusError, VIDEO_ID, Video, _safe_zip
 
-INDEX_NAME = re.compile(r"^YouTube_Video_Routing_Index_[0-9]{4}-[0-9]{2}-[0-9]{2}\\.csv$")
+INDEX_NAME = re.compile(r"^YouTube_Video_Routing_Index_[0-9]{4}-[0-9]{2}-[0-9]{2}\.csv$")
 DIGEST = re.compile(r"^[a-f0-9]{64}$")
 ROUTE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 REQUIRED_COLUMNS = {
