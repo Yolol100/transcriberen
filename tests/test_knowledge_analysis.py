@@ -41,6 +41,23 @@ class FakeModel:
 
 
 class CorpusTests(unittest.TestCase):
+    def test_realistic_full_course_transcript_is_not_silently_dropped(self):
+        # Previous 2 MB cap blocked eight videos in the existing v15 corpus,
+        # aborting the whole 18,875-video inventory.
+        with tempfile.TemporaryDirectory() as d:
+            z = Path(d) / "full-course.zip"
+            write_shard(z, [record(transcript="G" * 2_600_000)])
+            entry, = list(iter_videos(z))
+            self.assertEqual(len(entry.transcript), 2_600_000)
+            self.assertEqual(entry.transcript_sha256, sha256(entry.transcript))
+
+    def test_transcript_safety_limit_is_still_enforced(self):
+        with tempfile.TemporaryDirectory() as d:
+            z = Path(d) / "too-large.zip"
+            write_shard(z, [record(transcript="G" * 3_000_001)])
+            with self.assertRaisesRegex(CorpusError, "invalid transcript"):
+                list(iter_videos(z))
+
     def test_full_shard_and_comments(self):
         with tempfile.TemporaryDirectory() as d:
             z = Path(d) / "part.zip"

@@ -15,7 +15,9 @@ VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 MAX_MEMBERS = 35000
 MAX_TOTAL_UNCOMPRESSED = 700 * 1024 * 1024
 MAX_MEMBER = 80 * 1024 * 1024
-MAX_TRANSCRIPT = 2_000_000
+# The validated 2026 v15 corpus includes eight real 2.0-2.6 MB full-course
+# transcripts. Accept them intact; keep an explicit 3 MB per-video safety cap.
+MAX_TRANSCRIPT = 3_000_000
 MAX_DECOMPRESSED_TEXT = 600 * 1024 * 1024
 MAX_RECORDS_PER_ARCHIVE = 25000
 MAX_COMMENTS = 250
