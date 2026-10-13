@@ -26,6 +26,15 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn('workflow_dispatch:', text)
         self.assertNotIn('workflow_call:', text)
 
+    def test_governance_cannot_restore_old_self_hosted_transport(self):
+        governance = (ROOT / '.github/REPOSITORY-GOVERNANCE.md').read_text(encoding='utf-8')
+        self.assertIn('## GitHub-hosted execution boundary', governance)
+        self.assertIn('GitHub-hosted `ubuntu-24.04`', governance)
+        self.assertIn('immutable SHA', governance)
+        self.assertNotIn('[self-hosted,', governance)
+        self.assertNotIn('webactueel-transcribe', governance)
+        self.assertIn('geen self-hosted runner', governance)
+
 
 if __name__ == '__main__':
     unittest.main()

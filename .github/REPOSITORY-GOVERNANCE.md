@@ -18,18 +18,16 @@ Configureer Rulesets/branch protection voor `main` met minimaal:
 
 Bescherm deze branch tegen history rewrites, force-pushes en deletion. De workflow valideert het append-only contract nogmaals voordat het request wordt gebruikt.
 
-## Self-hosted boundary
+## GitHub-hosted execution boundary
 
-De GitHub-hosted job mag alleen transport/input valideren. YouTube-acquisitie draait uitsluitend op:
+De productiequeue `Transcribe Public Source` valideert transport en voert de publieke kanaalacquisitie uitsluitend uit op **GitHub-hosted `ubuntu-24.04`**. Er is geen self-hosted runner, custom runner, uitwijkmachine of machinefallback.
 
-`[self-hosted, linux, x64, webactueel-transcribe]`
+De resolve-job legt eerst de vertrouwde `main`-commit-SHA vast. De acquisition-job checkt **exact die immutable SHA** uit en controleert hem vóór uitvoering. Code vanaf de transportbranch `runtime-requests` wordt nooit als runtime uitgevoerd. `persist-credentials: false` is verplicht.
 
-De self-hosted job voert nooit code vanaf `runtime-requests` uit en checkt uitsluitend `Yolol100/transcriberen@main` uit met persisted credentials uitgeschakeld.
-
-De host blijft dedicated en bevat geen persoonlijke browserprofielen, SSH/cloudcredentials of andere projectsecrets.
+Geen cookies, login, persoonlijke browserprofielen, accountkeys, proxies of CAPTCHA-/PO-token-bypass. Een `access_blocked` bij kernacquisitie is terminaal en activeert geen alternatieve machine. De aparte handmatige `Corpus Knowledge Review` gebruikt eveneens uitsluitend een GitHub-hosted runner met lokale modelinference en mag geen netwerkacquisitie of automatische Skill-/projectbronpromotie starten.
 
 ## Kanaalpolicy
 
 De publieke capability is vast: `/videos`, alleen 2026, maximaal 1000 entries, maximaal 7 top-level comments per gematchte video, YouTube-side `top`, geen replies. Een verruiming hiervan vereist een expliciete productscopewijziging plus tests, contract- en threat-modelupdate.
 
-Branch protection, Rulesets en runnerregistratie zijn externe repository-admincontroles en kunnen niet volledig door repositorycode worden afgedwongen.
+Branch protection en Rulesets zijn externe repository-admincontroles en kunnen niet volledig door repositorycode worden afgedwongen.
