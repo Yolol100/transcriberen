@@ -3,7 +3,10 @@
   "capability_id": "github-hosted-local-youtube-knowledge-review",
   "repository": "Yolol100/transcriberen",
   "scope": "evidence_only_semantic_review_of_existing_corpora",
-  "source_inputs": ["same-repo-transcription-run-artifact", "same-repo-authorized-shard-release"],
+  "source_inputs": [
+    "same-repo-transcription-run-artifact",
+    "same-repo-authorized-shard-release"
+  ],
   "batch_size": 500,
   "slice_size": 20,
   "execution": "github-hosted-ubuntu-24.04-cpu-local-gguf",
@@ -23,7 +26,10 @@
     "release": "b11425",
     "sha256": "6a47856d08ecc4030b2fa8b8bf761c96d142d689567f69a0f75e42de430dc34c"
   },
-  "outputs": ["inventory.json", "videos/<video_id>.json"],
+  "outputs": [
+    "inventory.json",
+    "videos/<video_id>.json"
+  ],
   "boundaries": [
     "No modification of the public channel acquisition contract or queue",
     "No copied transcript/comment corpus on GitHub main",
@@ -31,6 +37,7 @@
     "No production, project-source, Skill or Memory promotion",
     "Human and current primary-source verification required before acceptance",
     "A model result alone is never complete expert verification",
-    "Partial, missing and blocked outcomes remain explicit"
+    "Partial, missing and blocked outcomes remain explicit",
+    "Legacy Library transcript digest mismatch is labeled; cannot become verified knowledge without independent source integrity evidence"
   ]
 }

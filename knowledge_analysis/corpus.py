@@ -37,6 +37,8 @@ class Video:
     transcript_sha256: str
     comments_status: str
     provenance: str
+    transcript_hash_claim: str = ""
+    transcript_hash_status: str = "match"
 
 
 def sha256(text: str) -> str:
@@ -114,8 +116,15 @@ def _record_to_video(row: dict, provenance: str) -> Video:
         raise CorpusError(f"invalid transcript for {video_id}")
     digest = sha256(transcript)
     claimed = row.get("transcript_sha256")
+    integrity = "match" if claimed else "missing"
     if claimed and claimed != digest:
-        raise CorpusError(f"transcript SHA mismatch for {video_id}")
+        # Legacy Library shard records may carry a digest for the original plain
+        # transcript while the inline record includes later timestamped material.
+        # Never silently call this a match; do not weaken channel-run validation.
+        if row.get("_record_type") == "youtube_video" and row.get("source_member"):
+            integrity = "legacy_claim_mismatch"
+        else:
+            raise CorpusError(f"transcript SHA mismatch for {video_id}")
     comments_raw = row.get("comments", [])
     comments = _comment_texts(comments_raw)
     if isinstance(comments_raw, list) and comments_raw and not comments:
@@ -134,6 +143,8 @@ def _record_to_video(row: dict, provenance: str) -> Video:
         transcript_sha256=digest,
         comments_status=status,
         provenance=provenance,
+        transcript_hash_claim=str(claimed or ""),
+        transcript_hash_status=integrity,
     )
 
 

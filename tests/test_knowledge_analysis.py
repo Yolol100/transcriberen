@@ -60,6 +60,34 @@ class CorpusTests(unittest.TestCase):
             with self.assertRaisesRegex(CorpusError, "SHA mismatch"):
                 list(iter_videos(z))
 
+    def test_legacy_library_hash_mismatch_is_downgraded_not_silent(self):
+        with tempfile.TemporaryDirectory() as d:
+            z = Path(d) / "part.zip"
+            data = record()
+            data["transcript_sha256"] = "a" * 64
+            data["source_member"] = "legacy_original_caption.txt"
+            write_shard(z, [data])
+            video, = list(iter_videos(z))
+            self.assertEqual(video.transcript_hash_status, "legacy_claim_mismatch")
+            self.assertEqual(video.transcript_hash_claim, "a" * 64)
+            fake = FakeModel()
+            reviewed = review_video(video, model=fake, model_sha256="b"*64,
+                                    out_dir=Path(d), chunk_size=510)
+            self.assertEqual(reviewed["status"], "ai_reviewed_unverified_legacy_source_hash")
+            self.assertTrue(reviewed["source_integrity_warning"])
+            self.assertFalse(reviewed["auto_promoted"])
+
+    def test_no_transcript_comments_still_get_reviewed(self):
+        video = Video("ABCDEFGHIJK", "T", "C", "", "", "unknown", (), "",
+                      ("This item has a broken keyboard navigation state.",),
+                      sha256(""), "ok", "fixture")
+        with tempfile.TemporaryDirectory() as d:
+            fake = FakeModel()
+            reviewed = review_video(video, model=fake, model_sha256="c"*64, out_dir=Path(d))
+            self.assertEqual(reviewed["status"], "no_transcript_comments_reviewed")
+            self.assertTrue(reviewed["comments_read_completely"])
+            self.assertEqual(len(fake.calls), 1)
+
     def test_rejects_traversal_and_symlinks(self):
         with tempfile.TemporaryDirectory() as d:
             z = Path(d) / "evil.zip"

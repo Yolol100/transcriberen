@@ -16,7 +16,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from knowledge_analysis.corpus import CorpusError, iter_videos
-from knowledge_analysis.review import LocalModel, review_video, STATUS_COMPLETE
+from knowledge_analysis.review import LocalModel, review_video, STATUS_COMPLETE, STATUS_SOURCE_WARNING, STATUS_NO_TRANSCRIPT_COMMENTS
 
 
 def file_hash(path: Path) -> str:
@@ -101,13 +101,15 @@ def main() -> int:
     inventory.update({
         "status": "evidence_only_pending_external_qa",
         "model_sha256": model_sha, "statuses": dict(counts),
-        "ai_reviewed_videos": counts[STATUS_COMPLETE],
+        "ai_reviewed_videos": counts[STATUS_COMPLETE] + counts[STATUS_SOURCE_WARNING],
+        "source_integrity_warning_videos": counts[STATUS_SOURCE_WARNING],
+        "comments_only_videos": counts[STATUS_NO_TRANSCRIPT_COMMENTS],
         "human_verified_videos": 0,
         "policy_promotions": 0,
     })
     (out / "inventory.json").write_text(json.dumps(inventory, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"batch": args.batch, "slice": args.slice, "counts": dict(counts)}, ensure_ascii=False))
-    return 0 if all(k in (STATUS_COMPLETE, "no_transcript") for k in counts) else 2
+    return 0 if all(k in (STATUS_COMPLETE, STATUS_SOURCE_WARNING, STATUS_NO_TRANSCRIPT_COMMENTS, "no_transcript") for k in counts) else 2
 
 
 if __name__ == "__main__":

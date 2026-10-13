@@ -23,8 +23,12 @@ In `review` mode the GitHub-hosted runner downloads SHA-256 verified `llama.cpp`
 - `inventory_only`: archive/input identity and batch selection checked; no semantic review.
 - `review_in_progress`: some chunks read; never final.
 - `ai_reviewed_pending_independent_verification`: every available transcript character and stored comment chunk was passed to local inference and the candidate claims contain verifiable exact excerpt positions. This is **not** expert review, verified technical truth, Skill acceptance or project acceptance.
-- `no_transcript`: original video transcript unavailable, cannot assess the video's explanation.
+- `no_transcript`: original video transcript unavailable and no saved comments.
+- `no_transcript_comments_reviewed`: saved comments were analyzed but the video itself has no available transcript.
+- `ai_reviewed_unverified_legacy_source_hash`: local analysis read the inline transcript text, but the legacy shard's declared SHA-256 differs from those exact bytes; independent integrity verification is mandatory before any promotion.
 - `blocked_local_model` / `blocked_time_budget`: partial evidence, safe retry needed.
+
+Some older Library shard records embed extra timestamped transcript material. Their recorded original transcript SHA-256 can differ from the SHA-256 of the complete inline text (2,160 of 3,201 records in a checked shard). The importer preserves BOTH hashes and records an explicit `legacy_claim_mismatch` warning rather than silently changing source material or aborting every unrelated video.
 
 The module **never** automatically writes to Google Drive, a live Skill, a project source or any production website. Creator claims, comment complaints and AI-generated suggestions remain hypotheses. The repo has no private Library, live Drive project comparison or independent official source validation mechanism. `webactueel-workflow` and the relevant specialist must review and accept any knowledge changes elsewhere, with source provenance and current official documentation.
 

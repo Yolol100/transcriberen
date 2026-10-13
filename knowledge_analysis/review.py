@@ -9,9 +9,11 @@ from urllib import request, error
 
 from .corpus import Video, sha256
 
-POLICY_VERSION = "knowledge-review-v1"
+POLICY_VERSION = "knowledge-review-v2"
 OWNERS = {"seo", "design", "elementor", "wordpressqualityarchitect", "website-qa-checklist", "leads", "vacature-search", "transcribeer"}
 STATUS_COMPLETE = "ai_reviewed_pending_independent_verification"
+STATUS_SOURCE_WARNING = "ai_reviewed_unverified_legacy_source_hash"
+STATUS_NO_TRANSCRIPT_COMMENTS = "no_transcript_comments_reviewed"
 
 
 class InferenceError(RuntimeError):
@@ -47,6 +49,8 @@ def signature(video: Video, model_sha256: str) -> str:
     payload = json.dumps({
         "policy": POLICY_VERSION, "video": video.video_id,
         "transcript_sha256": video.transcript_sha256,
+        "transcript_hash_claim": video.transcript_hash_claim,
+        "transcript_hash_status": video.transcript_hash_status,
         "comments_sha256": sha256(json.dumps(video.comments, ensure_ascii=False)),
         "model_sha256": model_sha256,
     }, ensure_ascii=False, sort_keys=True)
@@ -147,7 +151,7 @@ def review_video(video: Video, *, model: LocalModel, model_sha256: str,
     if out_path.exists():
         try:
             prior = json.loads(out_path.read_text(encoding="utf-8"))
-            if prior.get("signature") == sig and prior.get("status") in {STATUS_COMPLETE, "no_transcript"}:
+            if prior.get("signature") == sig and prior.get("status") in {STATUS_COMPLETE, STATUS_SOURCE_WARNING, STATUS_NO_TRANSCRIPT_COMMENTS, "no_transcript"}:
                 return {**prior, "resumed": True}
         except (ValueError, OSError):
             pass
@@ -163,6 +167,9 @@ def review_video(video: Video, *, model: LocalModel, model_sha256: str,
         "url": video.url, "authority": video.authority, "route_candidates": list(video.routes),
         "provenance": video.provenance,
         "transcript_sha256": video.transcript_sha256,
+        "transcript_hash_claim": video.transcript_hash_claim,
+        "transcript_hash_status": video.transcript_hash_status,
+        "source_integrity_warning": video.transcript_hash_status == "legacy_claim_mismatch",
         "transcript_characters": len(video.transcript),
         "transcript_chunks_expected": len(transcript_chunks),
         "comment_count": len(video.comments), "comments_status": video.comments_status,
@@ -176,9 +183,9 @@ def review_video(video: Video, *, model: LocalModel, model_sha256: str,
         record["chunks"] = list(prior.get("chunks", []))
         record["claims"] = list(prior.get("claims", []))
         record["rejected_unanchored_claims"] = prior.get("rejected_unanchored_claims", 0)
-    if not video.transcript:
+    if not video.transcript and not video.comments:
         record["status"] = "no_transcript"
-        record["completion_note"] = "No creator transcript; comments alone cannot establish video content"
+        record["completion_note"] = "No creator transcript and no saved comments"
         _atomic_json(out_path, record)
         return record
     metadata = {"video_id": video.video_id, "title": video.title, "published_date": video.published_date}
@@ -219,7 +226,12 @@ def review_video(video: Video, *, model: LocalModel, model_sha256: str,
             record["status"] = "review_in_progress"
             _atomic_json(out_path, record)
         if record["status"] != "blocked_time_budget":
-            record["status"] = STATUS_COMPLETE
+            if not video.transcript:
+                record["status"] = STATUS_NO_TRANSCRIPT_COMMENTS
+            elif video.transcript_hash_status != "match":
+                record["status"] = STATUS_SOURCE_WARNING
+            else:
+                record["status"] = STATUS_COMPLETE
         record["transcript_read_completely"] = (len([c for c in record["chunks"] if c["source"] == "transcript"]) == len(transcript_chunks))
         record["comments_read_completely"] = (len([c for c in record["chunks"] if c["source"] == "comment"]) == len(comment_chunks))
     except InferenceError as exc:
