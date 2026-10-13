@@ -416,6 +416,104 @@ class CorpusTests(unittest.TestCase):
                 self.assertEqual(res["status"], STATUS_COMPLETE)
                 self.assertGreater(len(fake.calls), old)
 
+    def test_restored_long_verbatim_claim_is_rejected_and_reprocessed(self):
+        # An imported artifact must not bypass the normal copyright filter.
+        t = ("This article explains a very specific detailed experience about "
+             "building accessible websites in ordinary teams. ") * 16
+        video = Video("ABCDEFGHIJK", "A", "B", "", "", "unknown", (),
+                      t, (), sha256(t), "ok", "fixture")
+        with tempfile.TemporaryDirectory() as d:
+            fake = FakeModel()
+            prior = review_video(video, model=fake, model_sha256="a" * 64,
+                                 out_dir=Path(d), chunk_size=510)
+            self.assertTrue(prior["claims"])
+            # Keep quote and all counters valid while injecting a long
+            # verbatim transcript passage into the separate claim field.
+            prior["claims"][0]["claim"] = t[:150]
+            path = Path(d) / "videos" / "ABCDEFGHIJK.json"
+            path.write_text(json.dumps(prior), encoding="utf-8")
+            before = len(fake.calls)
+            result = review_video(video, model=fake, model_sha256="a" * 64,
+                                  out_dir=Path(d), chunk_size=510)
+            self.assertFalse(result.get("resumed", False))
+            self.assertGreater(len(fake.calls), before)
+            self.assertEqual(result["status"], STATUS_COMPLETE)
+
+    def test_restored_out_of_bounds_claim_is_rejected_and_reprocessed(self):
+        t = "Report component keyboard errors in a reproducible test environment. " * 14
+        video = Video("ABCDEFGHIJK", "A", "B", "", "", "unknown", (),
+                      t, (), sha256(t), "ok", "fixture")
+        with tempfile.TemporaryDirectory() as d:
+            fake = FakeModel()
+            prior = review_video(video, model=fake, model_sha256="a" * 64,
+                                 out_dir=Path(d), chunk_size=510)
+            prior["claims"][0]["evidence_start"] += 1
+            prior["claims"][0]["evidence_end"] += 1
+            path = Path(d) / "videos" / "ABCDEFGHIJK.json"
+            path.write_text(json.dumps(prior), encoding="utf-8")
+            before = len(fake.calls)
+            result = review_video(video, model=fake, model_sha256="a" * 64,
+                                  out_dir=Path(d), chunk_size=510)
+            self.assertFalse(result.get("resumed", False))
+            self.assertGreater(len(fake.calls), before)
+
+    def test_previous_run_requires_same_trusted_main_revision(self):
+        # The previous run's name alone does not authenticate its results.
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/knowledge-analysis.yml").read_text()
+        self.assertIn("github.ref == 'refs/heads/main'", workflow)
+        for restriction in (
+            "test \"$run_name\" = 'Corpus Knowledge Review'",
+            "test \"$run_event\" = 'workflow_dispatch'",
+            "test \"$run_branch\" = 'main'",
+            'test "$run_sha" = "$GITHUB_SHA"',
+        ):
+            self.assertIn(restriction, workflow)
+
+    def test_checkpoint_span_index_scales_on_long_videos(self):
+        # 1,000+ chunks and anchored claims should not incur O(n*n) matching.
+        from knowledge_analysis.review import _valid_prior, _clean_claims, split_exact, POLICY_VERSION
+        from time import perf_counter
+        t = "Mobile navigation menus should remain keyboard usable and well labelled. " * 8900
+        video = Video("ABCDEFGHIJK", "Fixture", "Example", "", "", "unknown", (),
+                      t, (), sha256(t), "ok", "fixture")
+        model_sha = "b" * 64
+        segments = split_exact(t, 510)
+        self.assertGreater(len(segments), 1000)
+        tasks = [("transcript", None, start, end, text) for start, end, text in segments]
+        chunks = []
+        claims = []
+        for start, end, text in segments:
+            normalized, rejected = _clean_claims({"claims": [{
+                "claim": "Ensure accessible keyboard operation", "quote": text[:30],
+                "owner": "design", "kind": "pattern", "needs_current_verification": True,
+            }]}, text, start, "transcript")
+            self.assertEqual(rejected, 0)
+            self.assertEqual(len(normalized), 1)
+            chunks.append({"source": "transcript", "comment_index": None,
+                           "start": start, "end": end, "sha256": sha256(text),
+                           "model_result": "parsed_and_checked", "valid_claims": 1,
+                           "rejected_claims": 0})
+            claims.extend(normalized)
+        prior = {"schema_version": "1.0", "policy_version": POLICY_VERSION,
+                 "video_id": video.video_id, "transcript_sha256": video.transcript_sha256,
+                 "model_sha256": model_sha, "transcript_hash_status": "match",
+                 "source_integrity_warning": False, "title": video.title,
+                 "channel": video.channel, "url": video.url,
+                 "provenance": video.provenance, "status": STATUS_COMPLETE,
+                 "chunks": chunks, "claims": claims,
+                 "rejected_unanchored_claims": 0,
+                 "auto_promoted": False, "human_qa_approved": False,
+                 "project_source_compared": False, "primary_sources_verified": False,
+                 "transcript_read_completely": True,
+                 "comments_read_completely": True}
+        start = perf_counter()
+        valid = _valid_prior(prior, tasks, expected_status=STATUS_COMPLETE,
+                             video=video, model_sha256=model_sha)
+        duration = perf_counter() - start
+        self.assertTrue(valid)
+        self.assertLess(duration, 10.0, f"checkpoint validation unacceptably slow: {duration:.2f}s")
+
     def test_errors_do_not_mark_complete_and_retry(self):
         t = "Enough explanatory text for evidence review! " * 15
         video = Video("ABCDEFGHIJK", "A", "B", "", "", "unknown", (), t, (), sha256(t), "unknown", "fixture")
