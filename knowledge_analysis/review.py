@@ -1,6 +1,8 @@
 """Bounded chunk review with localhost-only inference and evidence-only output."""
 from __future__ import annotations
 
+from bisect import bisect_right
+from collections import defaultdict
 import json
 from pathlib import Path
 import re
@@ -9,7 +11,7 @@ from urllib import request, error
 
 from .corpus import Video, sha256
 
-POLICY_VERSION = "knowledge-review-v4"
+POLICY_VERSION = "knowledge-review-v5"
 OWNERS = {"seo", "design", "elementor", "wordpressqualityarchitect", "website-qa-checklist", "leads", "vacature-search", "transcribeer"}
 STATUS_COMPLETE = "ai_reviewed_pending_independent_verification"
 STATUS_SOURCE_WARNING = "ai_reviewed_unverified_legacy_source_hash"
@@ -153,7 +155,8 @@ def _atomic_json(path: Path, data: dict) -> None:
     temp.replace(path)
 
 
-def _valid_prior(prior: dict, tasks: list[tuple], *, expected_status: str) -> bool:
+def _valid_prior(prior: dict, tasks: list[tuple], *, expected_status: str,
+                 video: Video, model_sha256: str) -> bool:
     """Only reuse exact previously processed text spans and still-anchored claims.
 
     Artifacts can be downloaded from prior runs. Neither a matching claimed
@@ -161,9 +164,31 @@ def _valid_prior(prior: dict, tasks: list[tuple], *, expected_status: str) -> bo
     """
     if not isinstance(prior, dict):
         return False
+    # The signature covers input text/model/policy, but saved fields must still
+    # agree with the canonical source; imported artifacts are untrusted data.
+    if (prior.get("video_id") != video.video_id
+            or prior.get("transcript_sha256") != video.transcript_sha256
+            or prior.get("model_sha256") != model_sha256
+            or prior.get("transcript_hash_status") != video.transcript_hash_status
+            or prior.get("source_integrity_warning") is not (video.transcript_hash_status == "legacy_claim_mismatch")
+            or prior.get("policy_version") != POLICY_VERSION):
+        return False
     permitted = {"review_in_progress", "blocked_local_model", "blocked_time_budget",
                  STATUS_COMPLETE, STATUS_SOURCE_WARNING, STATUS_NO_TRANSCRIPT_COMMENTS,
                  "no_transcript"}
+    allowed_fields = {
+        "schema_version", "policy_version", "signature", "video_id", "title", "channel",
+        "published_date", "url", "authority", "route_candidates", "provenance",
+        "transcript_sha256", "transcript_hash_claim", "transcript_hash_status",
+        "source_integrity_warning", "transcript_characters", "transcript_chunks_expected",
+        "comment_count", "comments_status", "comment_chunks_expected", "model_sha256",
+        "status", "claims", "chunks", "rejected_unanchored_claims",
+        "project_source_compared", "primary_sources_verified", "human_qa_approved",
+        "auto_promoted", "completion_note", "error_class",
+        "transcript_read_completely", "comments_read_completely",
+    }
+    if set(prior) - allowed_fields:
+        return False
     status = prior.get("status")
     if status not in permitted or not isinstance(prior.get("chunks"), list) or not isinstance(prior.get("claims"), list):
         return False
@@ -176,6 +201,14 @@ def _valid_prior(prior: dict, tasks: list[tuple], *, expected_status: str) -> bo
                           STATUS_NO_TRANSCRIPT_COMMENTS, "no_transcript"}
     if complete and status != expected_status:
         return False
+    if (prior.get("policy_version") != POLICY_VERSION or
+            prior.get("schema_version") != "1.0" or
+            not isinstance(prior.get("title"), str) or len(prior["title"]) > 400 or
+            not isinstance(prior.get("channel"), str) or len(prior["channel"]) > 200 or
+            not isinstance(prior.get("url"), str) or len(prior["url"]) > 4096 or
+            not isinstance(prior.get("provenance"), str) or len(prior["provenance"]) > 1000 or
+            not isinstance(prior.get("completion_note", ""), str) or len(prior.get("completion_note", "")) > 300):
+        return False
     expected = {(source, idx, start, end, sha256(text)): text
                 for source, idx, start, end, text in tasks}
     seen = set()
@@ -185,8 +218,12 @@ def _valid_prior(prior: dict, tasks: list[tuple], *, expected_status: str) -> bo
             return False
         if type(item.get("start")) is not int or type(item.get("end")) is not int:
             return False
-        key = (item.get("source"), item.get("comment_index"), item["start"],
-               item["end"], item.get("sha256"))
+        source, idx, digest = item.get("source"), item.get("comment_index"), item.get("sha256")
+        if source not in ("transcript", "comment") or type(digest) is not str:
+            return False
+        if (source == "transcript" and idx is not None) or (source == "comment" and (type(idx) is not int or idx < 0)):
+            return False
+        key = (source, idx, item["start"], item["end"], digest)
         if key not in expected or key in seen:
             return False
         if type(item.get("valid_claims")) is not int or item["valid_claims"] < 0:
@@ -195,13 +232,27 @@ def _valid_prior(prior: dict, tasks: list[tuple], *, expected_status: str) -> bo
             return False
         seen.add(key)
         expected_claim_counts[key] = item["valid_claims"]
+    # Index only checked intervals. A long transcript can have thousands of
+    # chunks; scanning all chunks for every claim would be quadratic.
+    grouped = defaultdict(list)
+    for key in seen:
+        grouped[(key[0], key[1])].append((key[2], key))
+    indexed = {}
+    for group, entries in grouped.items():
+        entries.sort(key=lambda e: e[0])
+        indexed[group] = ([v[0] for v in entries], [v[1] for v in entries])
     actual_claim_counts = {key: 0 for key in seen}
     for item in prior["claims"]:
         if (not isinstance(item, dict) or not isinstance(item.get("quote"), str)
                 or not isinstance(item.get("claim"), str) or item.get("evidence_only") is not True):
             return False
         source, idx = item.get("source"), item.get("comment_index")
-        if source not in {"transcript", "comment"}:
+        if type(source) is not str or source not in ("transcript", "comment"):
+            return False
+        owner, kind = item.get("owner_candidate"), item.get("kind")
+        if (type(owner) is not str or owner not in OWNERS | {"unknown"}
+                or type(kind) is not str or kind not in {"fact", "pattern", "criticism", "question", "promotion", "unknown"}
+                or type(item.get("needs_current_verification")) is not bool):
             return False
         if source == "transcript":
             idx = None
@@ -212,12 +263,28 @@ def _valid_prior(prior: dict, tasks: list[tuple], *, expected_status: str) -> bo
             return False
         if not (0 < len(item["quote"]) <= 110 and end - start == len(item["quote"])):
             return False
-        matches = [key for key in seen if source == key[0] and idx == key[1]
-                   and key[2] <= start and end <= key[3]
-                   and expected[key][start - key[2]:end - key[2]] == item["quote"]]
-        if len(matches) != 1:
+        group = indexed.get((source, idx))
+        if not group:
             return False
-        actual_claim_counts[matches[0]] += 1
+        starts, keys = group
+        position = bisect_right(starts, start) - 1
+        if position < 0:
+            return False
+        key = keys[position]
+        if not (key[2] <= start and end <= key[3]
+                and expected[key][start - key[2]:end - key[2]] == item["quote"]):
+            return False
+        # Apply the original model-output sanitizer again; a public signature
+        # must not let imported artifacts bypass copyright/excerpt controls.
+        raw = {"claim": item["claim"], "quote": item["quote"],
+               "owner": item.get("owner_candidate"), "kind": item.get("kind"),
+               "needs_current_verification": item.get("needs_current_verification")}
+        normalized, rejected = _clean_claims({"claims": [raw]}, expected[key], key[2], source)
+        if rejected or len(normalized) != 1:
+            return False
+        if any(item.get(field) != normalized[0][field] for field in normalized[0]):
+            return False
+        actual_claim_counts[key] += 1
     if any(actual_claim_counts[key] != expected_claim_counts[key] for key in seen):
         return False
     # A corrupt restored counter must not cause TypeError when processing the
@@ -261,7 +328,8 @@ def review_video(video: Video, *, model: LocalModel, model_sha256: str,
                                STATUS_SOURCE_WARNING if video.transcript_hash_status != "match" else
                                STATUS_COMPLETE)
             if (isinstance(candidate, dict) and candidate.get("signature") == sig
-                    and _valid_prior(candidate, tasks, expected_status=expected_status)):
+                    and _valid_prior(candidate, tasks, expected_status=expected_status,
+                                     video=video, model_sha256=model_sha256)):
                 prior = candidate
                 if candidate.get("status") == expected_status:
                     return {**candidate, "resumed": True}

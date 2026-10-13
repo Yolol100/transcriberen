@@ -363,6 +363,59 @@ class CorpusTests(unittest.TestCase):
         self.assertEqual(claims[0]["kind"], "unknown")
         self.assertTrue(claims[0]["needs_current_verification"])
 
+    def test_restored_video_metadata_forgery_cannot_pass_as_complete(self):
+        t = "Accessible input controls should give users comprehensible errors. " * 20
+        video = Video("ABCDEFGHIJK", "A", "B", "", "", "unknown", (), t, (), sha256(t), "ok", "fixture")
+        for key, value in (("video_id", "LMNOPQRSTUV"), ("model_sha256", "1" * 64),
+                           ("source_integrity_warning", True), ("policy_version", "knowledge-review-v0")):
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as d:
+                fake = FakeModel()
+                prior = review_video(video, model=fake, model_sha256="a" * 64, out_dir=Path(d), chunk_size=510)
+                prior[key] = value
+                path = Path(d) / "videos" / "ABCDEFGHIJK.json"
+                path.write_text(json.dumps(prior))
+                old = len(fake.calls)
+                resumed = review_video(video, model=fake, model_sha256="a" * 64,
+                                       out_dir=Path(d), chunk_size=510)
+                self.assertFalse(resumed.get("resumed", False))
+                self.assertEqual(resumed["status"], STATUS_COMPLETE)
+                self.assertGreater(len(fake.calls), old)
+
+    def test_unhashable_restored_chunk_identity_is_rejected_without_crash(self):
+        t = "Form feedback should remain understandable on a small screen. " * 20
+        video = Video("ABCDEFGHIJK", "A", "B", "", "", "unknown", (), t, (), sha256(t), "ok", "fixture")
+        for field, value in (("source", ["transcript"]), ("comment_index", [0]),
+                             ("sha256", {"digest": "bogus"})):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as d:
+                fake = FakeModel()
+                prior = review_video(video, model=fake, model_sha256="a" * 64, out_dir=Path(d), chunk_size=510)
+                prior["chunks"][0][field] = value
+                path = Path(d) / "videos" / "ABCDEFGHIJK.json"
+                path.write_text(json.dumps(prior))
+                old = len(fake.calls)
+                res = review_video(video, model=fake, model_sha256="a" * 64,
+                                   out_dir=Path(d), chunk_size=510)
+                self.assertEqual(res["status"], STATUS_COMPLETE)
+                self.assertGreater(len(fake.calls), old)
+
+    def test_untrusted_restored_claim_owner_and_verification_are_not_reused(self):
+        t = "Field labels and validation messages must be clear on mobile. " * 25
+        video = Video("ABCDEFGHIJK", "A", "B", "", "", "unknown", (), t, (), sha256(t), "ok", "fixture")
+        for field, value in (("owner_candidate", ["design"]), ("kind", {"type": "fact"}),
+                             ("needs_current_verification", "false")):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as d:
+                fake = FakeModel()
+                prior = review_video(video, model=fake, model_sha256="a" * 64, out_dir=Path(d), chunk_size=510)
+                self.assertTrue(prior["claims"])
+                prior["claims"][0][field] = value
+                path = Path(d) / "videos" / "ABCDEFGHIJK.json"
+                path.write_text(json.dumps(prior))
+                old = len(fake.calls)
+                res = review_video(video, model=fake, model_sha256="a" * 64,
+                                   out_dir=Path(d), chunk_size=510)
+                self.assertEqual(res["status"], STATUS_COMPLETE)
+                self.assertGreater(len(fake.calls), old)
+
     def test_errors_do_not_mark_complete_and_retry(self):
         t = "Enough explanatory text for evidence review! " * 15
         video = Video("ABCDEFGHIJK", "A", "B", "", "", "unknown", (), t, (), sha256(t), "unknown", "fixture")
