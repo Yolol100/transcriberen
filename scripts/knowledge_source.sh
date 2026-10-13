@@ -24,10 +24,9 @@ case "$KIND" in
       test "$run_branch" = 'runtime-requests' || {
         echo 'untrusted or unfinished transcription run; source blocked' >&2; exit 2;
       }
-    case "$run_path" in
-      '.github/workflows/transcribe.yml@runtime-requests'|'.github/workflows/transcribe.yml@refs/heads/runtime-requests') ;;
-      *) echo 'untrusted transcription workflow path; source blocked' >&2; exit 2 ;;
-    esac
+    test "$run_path" = '.github/workflows/transcribe.yml' || {
+      echo 'untrusted transcription workflow path; source blocked' >&2; exit 2;
+    }
     gh run download "$ID" --repo "$GITHUB_REPOSITORY" --pattern 'transcription-result-*' --dir "$DEST"
     mapfile -d '' inputs < <(find "$DEST" -type f -name 'channel-corpus.zip' -print0)
     test "${#inputs[@]}" -eq 1 || { echo 'expected exactly one channel-corpus.zip artifact' >&2; exit 2; }
