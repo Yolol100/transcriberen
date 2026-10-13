@@ -20,6 +20,8 @@ case "$KIND" in
     [[ "$ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{2,79}$ ]] || { echo 'invalid release tag' >&2; exit 2; }
     # User has to explicitly supply archive assets to a release. Never publish local Library material implicitly.
     gh release download "$ID" --repo "$GITHUB_REPOSITORY" --pattern 'YouTube_Kennisbron_Master.part-*.zip' --dir "$DEST" --clobber
+    gh release download "$ID" --repo "$GITHUB_REPOSITORY" --pattern 'YouTube_Kennisbron_Master.zip' --dir "$DEST" --clobber
+    test -f "$DEST/YouTube_Kennisbron_Master.zip" || exit 2
     mapfile -d '' inputs < <(find "$DEST" -maxdepth 1 -type f -name 'YouTube_Kennisbron_Master.part-*.zip' -print0 | sort -z)
     test "${#inputs[@]}" -gt 0 || { echo 'no corpus shards in GitHub release' >&2; exit 2; }
     ;;
