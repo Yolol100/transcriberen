@@ -36,7 +36,10 @@ def _digest(value: dict) -> str:
 def _source_url(value: object) -> bool:
     if not isinstance(value, str) or not (12 <= len(value) <= 2048):
         return False
-    parsed = urlsplit(value)
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return False
     return (parsed.scheme == "https" and bool(parsed.hostname)
             and parsed.username is None and parsed.password is None
             and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
@@ -63,6 +66,8 @@ def _validate_review(video: dict) -> bool:
     if not isinstance(status, str):
         raise Phase4Error("invalid review status")
     complete = status in REVIEWED_STATUSES
+    if status == STATUS_SOURCE_WARNING and video.get("source_integrity_warning") is not True:
+        raise Phase4Error("source-warning review lost its integrity warning")
     if complete and (video.get("transcript_read_completely") is not True
                      or video.get("comments_read_completely") is not True):
         raise Phase4Error("reviewed status without complete saved chunk coverage")
@@ -99,6 +104,8 @@ def _candidate(video: dict, claim: dict) -> dict:
         "review_signature": video["signature"], "video_id": video["video_id"],
         "source": src, "comment_index": idx, "evidence_start": start,
         "evidence_end": end, "quote": quote, "claim": text,
+        "owner_candidate": owner, "kind": claim.get("kind", "unknown"),
+        "needs_current_verification": claim.get("needs_current_verification") is not False,
     }
     return {
         "claim_id": _digest(identity),
@@ -194,7 +201,7 @@ def triage(reviews: list[dict], decisions: list[dict] | None = None) -> dict:
             }))
             # A hash conflict cannot be converted into an accepted new rule,
             # even when a reviewer submits a plausible external URL.
-            if item["transcript_hash_warning"] and item["proposed_category"] == "UPDATE":
+            if (item["transcript_hash_warning"] or video.get("status") == STATUS_SOURCE_WARNING) and item["proposed_category"] == "UPDATE":
                 raise Phase4Error("legacy transcript digest warning blocks an UPDATE proposal")
             items.append(item)
     if set(proposed) - ids:
