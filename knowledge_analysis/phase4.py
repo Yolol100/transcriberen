@@ -6,7 +6,8 @@ owner approval must occur outside this isolated GitHub repository workflow.
 """
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
+from bisect import bisect_right
 from datetime import date
 from hashlib import sha256
 import json
@@ -46,6 +47,91 @@ def _source_url(value: object) -> bool:
             and not parsed.hostname.endswith((".local", ".internal")))
 
 
+def _require_chunk_coverage(video: dict) -> None:
+    """Check saved chunk spans and per-chunk claim counts, without claiming raw-source QA.
+
+    Review JSON is downloaded as untrusted evidence. A reported 'complete' flag
+    is not proof that all source chunks were processed, even when SHA fields
+    happen to be syntactically valid.
+    """
+    chunks = video.get("chunks")
+    t_count = video.get("transcript_chunks_expected")
+    c_count = video.get("comment_chunks_expected")
+    t_chars = video.get("transcript_characters")
+    comments = video.get("comment_count")
+    rejected = video.get("rejected_unanchored_claims")
+    if (not isinstance(chunks, list) or len(chunks) > 25_000
+            or any(type(v) is not int or v < 0 for v in
+                   (t_count, c_count, t_chars, comments, rejected))
+            or t_count + c_count != len(chunks)
+            or t_chars > 3_000_000 or comments > 250):
+        raise Phase4Error("missing or inconsistent source chunk coverage counters")
+    if (video["status"] == STATUS_NO_TRANSCRIPT_COMMENTS) != (t_chars == 0):
+        raise Phase4Error("transcript/comment-only completion status mismatch")
+    by_group = defaultdict(list)
+    expected_claims = {}
+    rejected_total = 0
+    actual_counts = Counter()
+    for item in chunks:
+        if not isinstance(item, dict) or item.get("model_result") != "parsed_and_checked":
+            raise Phase4Error("non-validated source chunk in completed review")
+        src, idx = item.get("source"), item.get("comment_index")
+        start, end, digest = item.get("start"), item.get("end"), item.get("sha256")
+        valid, bad = item.get("valid_claims"), item.get("rejected_claims")
+        if ((src == "transcript" and idx is not None)
+                or (src == "comment" and (type(idx) is not int or not 0 <= idx < comments))
+                or src not in ("transcript", "comment")
+                or type(start) is not int or type(end) is not int
+                or start < 0 or end <= start
+                or not isinstance(digest, str) or not HEX256.fullmatch(digest)
+                or type(valid) is not int or type(bad) is not int
+                or valid < 0 or bad < 0 or valid + bad > 8):
+            raise Phase4Error("invalid processed chunk span or model counters")
+        key = (src, idx, start, end)
+        if key in expected_claims:
+            raise Phase4Error("repeated source chunk in completed review")
+        expected_claims[key] = valid
+        rejected_total += bad
+        by_group[(src, idx)].append((start, end, key))
+    if rejected_total != rejected:
+        raise Phase4Error("rejection counter differs from processed source chunks")
+    if (len(by_group.get(("transcript", None), [])) != t_count
+            or sum(len(v) for (src, _), v in by_group.items() if src == "comment") != c_count
+            or {idx for (src, idx) in by_group if src == "comment"} != set(range(comments))):
+        raise Phase4Error("transcript or saved comment chunk count is incomplete")
+    indexed = {}
+    for group, spans in by_group.items():
+        spans.sort(key=lambda s: s[0])
+        offset = 0
+        for start, end, _ in spans:
+            if start != offset:
+                raise Phase4Error("gap or overlap in processed source chunks")
+            offset = end
+        if group[0] == "transcript" and offset != t_chars:
+            raise Phase4Error("processed transcript does not cover all declared characters")
+        indexed[group] = ([x[0] for x in spans], spans)
+    for claim in video["claims"]:
+        if not isinstance(claim, dict):
+            raise Phase4Error("malformed claim in completed source review")
+        src, idx = claim.get("source"), claim.get("comment_index")
+        start, end = claim.get("evidence_start"), claim.get("evidence_end")
+        if src == "transcript":
+            idx = None
+        if (src not in ("transcript", "comment") or type(start) is not int
+                or type(end) is not int or start < 0 or end <= start):
+            raise Phase4Error("claim has no bounded processed source span")
+        group = indexed.get((src, idx))
+        if group is None:
+            raise Phase4Error("claim references unprocessed source")
+        starts, spans = group
+        pos = bisect_right(starts, start) - 1
+        if pos < 0 or end > spans[pos][1]:
+            raise Phase4Error("claim is outside its processed source chunk")
+        actual_counts[spans[pos][2]] += 1
+    if any(actual_counts[key] != count for key, count in expected_claims.items()):
+        raise Phase4Error("processed chunk claim counters do not match retained evidence")
+
+
 def _validate_review(video: dict) -> bool:
     if not isinstance(video, dict) or video.get("schema_version") != "1.0":
         raise Phase4Error("unsupported review record")
@@ -66,11 +152,19 @@ def _validate_review(video: dict) -> bool:
     if not isinstance(status, str):
         raise Phase4Error("invalid review status")
     complete = status in REVIEWED_STATUSES
-    if status == STATUS_SOURCE_WARNING and video.get("source_integrity_warning") is not True:
-        raise Phase4Error("source-warning review lost its integrity warning")
+    digest_status = video.get("transcript_hash_status")
+    if digest_status not in {"match", "missing", "legacy_claim_mismatch"}:
+        raise Phase4Error("unknown source transcript integrity status")
+    if video.get("source_integrity_warning") is not (digest_status == "legacy_claim_mismatch"):
+        raise Phase4Error("inconsistent source digest warning")
+    if ((status == STATUS_COMPLETE and digest_status != "match")
+            or (status == STATUS_SOURCE_WARNING and digest_status == "match")):
+        raise Phase4Error("review completion status conflicts with source digest")
     if complete and (video.get("transcript_read_completely") is not True
                      or video.get("comments_read_completely") is not True):
         raise Phase4Error("reviewed status without complete saved chunk coverage")
+    if complete:
+        _require_chunk_coverage(video)
     if not complete and video["claims"]:
         # Partially reviewed chunks remain useful as raw evidence but are not
         # eligible for knowledge triage until the original source review completes.
