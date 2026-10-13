@@ -282,6 +282,15 @@ def run_checks(root: Path = ROOT) -> dict:
                 failures.append("knowledge review model/runtime SHA pin mismatch")
         if "--host 127.0.0.1" not in model_contents:
             failures.append("knowledge review model must run on loopback only")
+    # Distinct retrospective-analysis safety boundary: do not alter channel toolkit policy.
+    if addon_contract_path.is_file():
+        addon = json.loads(addon_contract_path.read_text(encoding="utf-8"))
+        if addon.get("max_transcript_utf8_bytes") != 3_000_000:
+            failures.append("historical transcript limit contract mismatch")
+        corpus_file = root / "knowledge_analysis/corpus.py"
+        if corpus_file.is_file() and "MAX_TRANSCRIPT = 3_000_000" not in corpus_file.read_text(encoding="utf-8"):
+            failures.append("historical transcript limit code/contract drift")
+
     knowledge_workflow = root / ".github/workflows/knowledge-analysis.yml"
     if knowledge_workflow.is_file():
         review_text = knowledge_workflow.read_text(encoding="utf-8")

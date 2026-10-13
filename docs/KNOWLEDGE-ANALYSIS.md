@@ -20,6 +20,18 @@ In `review` mode the GitHub-hosted runner downloads SHA-256 verified `llama.cpp`
 4. Choose `batch=1` for the first 500 videos. `scope=inventory` only checks archive membership; it **does not** review semantics. Choose `scope=slice`, `slice=0` for 20 videos or `scope=batch` for all 500 split across 25 slices. The last batch has fewer slices automatically.
 5. Review the `knowledge-review-batch-*-slice-*` workflow artifacts. `resume_run_id` can target an earlier Corpus Knowledge Review run. Only outputs with the same video, transcript digest, comment digest, model digest and policy version can be reused, including completed chunks of an interrupted video.
 
+## Resume integrity and long-course transcripts
+
+Downloaded run artifacts are **untrusted input**. Before reusing a previous video review, the reviewer now validates the input text digest, model digest, reviewer policy, chunk-size, source metadata, each exact transcript/comment span, per-chunk evidence claims, and completion flags. A mismatched or malformed checkpoint is reprocessed instead of being marked complete. If the chunk layout changes, previous model output is not silently reused. No saved record can set `project_source_compared`, `primary_sources_verified`, `human_qa_approved` or `auto_promoted` to true through the review pipeline.
+
+Some verified historical master-shard transcripts exceed 2 MB; the importer accepts complete UTF-8 text up to a bounded 3 MB per-video limit. It still rejects over-limit items rather than truncating them. These are evidence-integrity fixes, not a broader YouTube acquisition policy or knowledge-promotion authorization.
+
+## Provenance and bounded historical-corpus intake
+
+Retrospective video transcripts are accepted only up to **3,000,000 UTF-8 bytes per video**, without truncation. This historical evidence limit is recorded in `knowledge-analysis-contract.json`, validated by the repository doctor, and is separate from the unchanged public channel acquisition contract. Previously analyzed source bytes are never silently discarded.
+
+A previous `Corpus Knowledge Review` result is resumable only when its GitHub run originated from **`workflow_dispatch` on `main` at the identical immutable code commit (`GITHUB_SHA`)**. The review additionally checks the current source metadata, full transcript/comment digests, comment retrieval status, analysis policy, model digest, chunk spans and anchored evidence against the original text. Old or tampered checkpoints are reprocessed or explicitly rejected; a zero-claim chunk is not automatically proof of factual verification.
+
 ## Evidence boundaries
 
 - `inventory_only`: archive/input identity and batch selection checked; no semantic review.

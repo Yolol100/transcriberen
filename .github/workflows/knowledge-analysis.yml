@@ -120,7 +120,7 @@ jobs:
           print('End-to-end archive -> local AI -> JSON progress: PASS')
           PY_ASSERT
   inventory:
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'Yolol100/transcriberen'
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'Yolol100/transcriberen' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     outputs:
@@ -241,7 +241,13 @@ jobs:
           set -euo pipefail
           [[ "$PREVIOUS_RUN" =~ ^[1-9][0-9]{5,15}$ ]] || exit 2
           run_name="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN" --jq '.name')"
+          run_event="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN" --jq '.event')"
+          run_branch="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN" --jq '.head_branch')"
+          run_sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN" --jq '.head_sha')"
           test "$run_name" = 'Corpus Knowledge Review' || exit 2
+          test "$run_event" = 'workflow_dispatch' || exit 2
+          test "$run_branch" = 'main' || exit 2
+          test "$run_sha" = "$GITHUB_SHA" || { echo 'prior review used a different trusted code SHA; fail closed' >&2; exit 2; }
           mkdir -p "$RUNNER_TEMP/previous"
           gh run download "$PREVIOUS_RUN" --repo "$GITHUB_REPOSITORY" --pattern 'knowledge-review-batch-*' --dir "$RUNNER_TEMP/previous"
           mapfile -t src < "$RUNNER_TEMP/corpus/INPUT-FILES.txt"

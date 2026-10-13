@@ -53,6 +53,9 @@ YouTube kan publieke endpoints voor datacenter-IP's wijzigen of blokkeren. De ru
 | Modelgewichten/binary supply chain | Gepinde download-URL's, SHA-256 voor beiden, fail-closed bij download- of digestfout; lokaal loopbackmodel |
 | Onbedoelde externe data-uitstroom | Alleen localhost-inferentie; geen OpenAI/GitHub Models/derde AI-API of gebruiker-provided secret |
 | ZIP-slip, compressiebom, enorme JSONL | Weigering van onveilige ZIP-members, streaminglimiet op geneste BZ2-expansie, maximumrecordgrootte en intakecount |
+| Historische transcriptlengte | Alleen de afzonderlijke archiefanalyse accepteert maximaal 3.000.000 UTF-8-bytes per video; nooit afkappen; afwijking wordt geblokkeerd. De netwerkacquisitie in `toolkit-contract.json` blijft onveranderd |
+| Onbetrouwbare eerdere review-artifacts | Hervatten vereist `workflow_dispatch` op de exacte huidige `main`-commit; de model- en source-checkpoints worden per chunk, commentstatus, citaten en metadata opnieuw gevalideerd |
+
 | Onvolledige oorspronkelijke kanaalrun | Bronreceipt blijft `partial`/`access_blocked` met unresolved/video-aantallen, nooit groen afgeleid van alleen aanwezige bestanden |
 | Stale of vreemde hervatbestanden | Filter op exacte geselecteerde video-ID's; bron-/comments-/transcript-/model-/policyhash vereist voor veilig hergebruik |
 | Hallucinaties, creatorreclame, onjuiste bronidentiteit | Strikte beperkte JSON, echte exacte citaatankers, leeftijd/provenance en onzekerheid; menselijke controle van elke materiele bronupdate |
