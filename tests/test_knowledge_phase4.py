@@ -168,7 +168,7 @@ class Phase4Tests(unittest.TestCase):
             triage([video])
         video = fixture()
         video["claims"][0]["evidence_end"] = 9999
-        with self.assertRaisesRegex(Phase4Error, "offsets"):
+        with self.assertRaisesRegex(Phase4Error, "processed source chunk"):
             triage([video])
 
 
