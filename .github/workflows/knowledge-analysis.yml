@@ -2,6 +2,15 @@ name: Corpus Knowledge Review
 
 # Existing Transcribe Public Source queue is not modified or automatically extended.
 on:
+  pull_request:
+    paths:
+      - knowledge_analysis/**
+      - scripts/knowledge_model.sh
+      - scripts/knowledge_source.sh
+      - scripts/knowledge_analyze.py
+      - tests/test_knowledge_analysis.py
+      - knowledge-analysis-contract.json
+      - .github/workflows/knowledge-analysis.yml
   workflow_dispatch:
     inputs:
       source_kind:
@@ -44,8 +53,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  model-canary:
+    if: github.event_name == 'pull_request' && github.repository == 'Yolol100/transcriberen'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout local-model review code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Verify pinned binary/model and start local inference
+        run: bash scripts/knowledge_model.sh "$RUNNER_TEMP/local-model"
+      - name: Confirm local LLM speaks strict JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY_CANARY'
+          from knowledge_analysis.review import LocalModel
+          result = LocalModel(timeout=240).ask(
+              "transcript", "For accessibility, provide labels for fields and support keyboard navigation.",
+              {"title":"Canary", "video_id":"ABCDEFGHIJK", "published_date":"20261013"})
+          assert isinstance(result.get("claims"), list), "local model failed schema smoke"
+          print("Local model returned a JSON claims array; no external inference service used")
+          PY_CANARY
   inventory:
-    if: github.repository == 'Yolol100/transcriberen'
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'Yolol100/transcriberen'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     outputs:
