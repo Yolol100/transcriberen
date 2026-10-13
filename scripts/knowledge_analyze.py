@@ -16,7 +16,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from knowledge_analysis.corpus import CorpusError, iter_videos, source_receipt
-from knowledge_analysis.routing import load_master_routing, apply_master_routing
+from knowledge_analysis.routing import load_master_routing, apply_master_routing, verify_pinned_shards
 from knowledge_analysis.review import LocalModel, review_video, STATUS_COMPLETE, STATUS_SOURCE_WARNING, STATUS_NO_TRANSCRIPT_COMMENTS
 
 
@@ -59,6 +59,8 @@ def main() -> int:
     for src in args.source:
         if not src.is_file() or src.stat().st_size > 1500 * 1024 * 1024:
             parser.error(f"source missing or too large: {src}")
+    if routing is not None:
+        verify_pinned_shards(args.master_routing, args.source, len(routing))
     all_videos = {}
     for src in args.source:
         for item in iter_videos(src):
