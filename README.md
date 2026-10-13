@@ -1,42 +1,31 @@
-# ZIP Corpus Review
+# Transcriberen — ZIP naar kennisvoorstellen
 
-**Doel:** bestaande transcripties en opgeslagen reacties uit een aangeleverd ZIP-bestand beoordelen. Geen live YouTube-acquisitie, API-key, nieuwe provider of automatische bronwijzigingen.
+**Gewenste ervaring:** upload één ZIP in ChatGPT of wijs een ZIP in de Library aan. De publieke repository verwerkt de reeds opgeslagen transcripties en reacties per 500 video's; ChatGPT geeft onderbouwde verbeterkandidaten terug voor Webactueel-bronnen en Skills.
 
-## Stap 1 — bereid een ZIP voor
+## Wat nu bewezen werkt
 
-Accepteert een ZIP met records.jsonl (elk record bevat video_id, title, channel, transcript, comments) of het bestaande Webactueel-master/shardpakket. Voor het huidige Library-corpus geldt: de masterindex alleen is niet genoeg, alle 15 shard-ZIP's zijn vereist. Het huidige manifest omvat 18.875 video's.
+- ZIP-validatie, inclusief de masterindex met 15 shards.
+- Bestaande GitHub-hosted lokale Qwen3-analyse, 500-video-batches met 20-video-slices, evidence-only claims en synthetische CI-tests.
+- GitHub geeft **geen** automatische toestemming om canonieke bronnen of Skills te wijzigen.
 
-Voer een lokale broncontrole uit:
+## Wat nog niet end-to-end werkt
 
-    python scripts/intake.py --zip /private/input/YouTube_Kennisbron_Bundle.zip --out /private/validated --master-sha256 <PINNED_MASTER_SHA256>
+**De repository blijft public.** De huidige `.github/workflows/review.yml` is een oude *private-repository-only* invoerroute. Ze vereist een ZIP als GitHub Release en weigert te draaien op een publieke repository. Maak ruwe transcript- of comment-ZIP's nooit openbaar om dat te omzeilen.
 
-Bij een generieke ZIP zonder master vervalt de optie --master-sha256. Deze controle leest geen YouTube-pagina's.
+De bestaande ChatGPT GitHub-koppeling kan code en kleine tekstverzoeken schrijven en runresultaten lezen, maar **niet** een grote binaire ZIP rechtstreeks veilig naar GitHub Actions uploaden of een dispatch starten. Deze externe overdracht is dus `BLOCKED_TRANSPORT`.
 
-## Stap 2 — GitHub verwerkt per 500 video's
+De beoogde brug is: **ChatGPT-upload → private bronopslag → GitHub Actions met kortlevende, doelgebonden OIDC-toegang → volledige batches → private detailresultaten → ChatGPT-rapport**. Eerst moeten de private opslag/identiteit en het retourkanaal aantoonbaar verbonden zijn. Alleen daarna mag de public-gate veilig worden vervangen.
 
-De workflow .github/workflows/review.yml gebruikt een **PRIVATE** repository en een daarin bewust door de eigenaar aangemaakte private GitHub Release met precies het asset YouTube_Kennisbron_Bundle.zip. Vul de tag, SHA256 van de complete ZIP, eventuele master SHA256, batch 1 en scope inventory in. Daarna scope batch om de maximaal 500 video's te verwerken in 20-video-slices met vier parallelle workers. Voor 18.875 video's zijn dit 38 batches; batch 38 bevat 375 video's.
+## Bediening na die eenmalige verbinding
 
-De lokale Qwen3-inferentie draait op GitHub-hosted runners en gebruikt uitsluitend verifieerbare gepinde model-/runtime-downloads. Er wordt geen YouTube-netwerkacquisitie uitgevoerd. Alle aanwezige transcript- en commentchunks worden verwerkt; ontbrekende en gedeeltelijke bronnen blijven expliciet.
+1. Upload een ZIP of verwijs naar de Library-versie.
+2. Vraag: **'Analyseer deze ZIP voor verbeteringen in Webactueel-bronnen en Skills.'**
+3. Ontvang per betrokken Skill: `UPDATE`, `ALREADY_COVERED`, `REJECTED` of `NEEDS_VERIFICATION`, inclusief controleerbaar bewijs en ontbrekende verificatie.
 
-**BELANGRIJK:** deze repository is op dit moment openbaar. De workflow weigert daarom productie-invoer. Zet de repository eerst bewust op private en upload alleen materiaal dat je daar mag verwerken. Een bestand in een ChatGPT-gesprek verschijnt niet automatisch in GitHub. Zonder expliciete private overdracht kan GitHub die ZIP niet lezen. Het uploaden van deze content naar een publieke Release of broncode is geen aanvaardbare omweg.
+**Geen online YouTube-acquisitie, geen 38 handmatige batchstarts, geen automatische kennisupdates.**
 
-## Stap 3 — voorstellen, geen automatische wijzigingen
+## Huidige technische tests
 
-Elke analysetaak produceert inventory.json, brongebonden JSON per video, een phase-4-claimledger en comparison.json. Claims blijven evidence-only. Aanvankelijke classificatie is NEEDS_VERIFICATION; ALREADY_COVERED is slechts een lexicale matchesuggestie wanneer je actuele bronbestanden meegeeft. UPDATE/REJECTED vereisen inhoudelijke toetsing. De juiste Webactueel-vakowner verifieert huidige Google Drive-projectbronnen, actuele officiële bronnen en de betreffende Skill voordat een aanpassing wordt toegestaan.
+`python -m unittest discover -s tests -p 'test_*.py' -v`
 
-Je kunt een bronvergelijking offline uitvoeren met:
-
-    python scripts/compare.py --ledger /private/review/ledger.json --sources /private/Webactueel_Sources.zip --out /private/review/comparison.json
-
-De bronnen-ZIP bestaat uitsluitend uit relevante .md, .txt of .json bestanden. Een match is geen feitelijke of actuele verificatie. Zonder bronnen-ZIP worden geen bronupdates aangenomen.
-
-## Veiligheid en grenzen
-
-- Alleen opgeslagen ZIP-evidence; geen YouTube-search, video/audio-download of captionprovider.
-- ZIP-fail-closed op veilige paden, master- en shard-SHA, records en duplicaten; geen stille truncatie.
-- Bestaande bronbeperkingen, onbekende data en ontbrekende comments blijven zichtbaar.
-- Geen automatische promotie van claims naar Project, Skill, Memory of websites.
-- Geen ruwe transcripties committen of als openbaar Actions-artifact publiceren.
-- CI-test: python -m unittest discover -s tests -p 'test_*.py' -v.
-
-Historische code is niet de actuele werking van main. De oude commit 48f5ca180c5571b5decf6de011cad687f3f57001 blijft via Gitgeschiedenis herstelbaar.
+[Ontwerp- en bevoegdheidsgrens](docs/CHATGPT_HANDOFF.md). De workflow bevat nog geen werkende ChatGPT→GitHub ZIP-overdracht. Groene tests zijn geen bewijs van een voltooide corpusrun.
