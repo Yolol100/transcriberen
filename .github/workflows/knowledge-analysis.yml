@@ -1,0 +1,199 @@
+name: Corpus Knowledge Review
+
+# Existing Transcribe Public Source queue is not modified or automatically extended.
+on:
+  workflow_dispatch:
+    inputs:
+      source_kind:
+        description: 'Previously generated transcription run or explicitly published same-repo release'
+        required: true
+        type: choice
+        options: [run, release]
+        default: run
+      source_identifier:
+        description: 'Existing Transcribe Public Source run ID OR same-repo corpus release tag'
+        required: true
+        type: string
+      batch:
+        description: '1-indexed group of 500 unique video IDs'
+        required: true
+        default: '1'
+        type: string
+      scope:
+        description: 'Inventory first; review one 20-video slice or the entire 500-video group'
+        required: true
+        type: choice
+        options: [inventory, slice, batch]
+        default: inventory
+      slice:
+        description: '0-indexed 20-video group for scope=slice'
+        required: true
+        default: '0'
+        type: string
+      resume_run_id:
+        description: 'Optional prior Corpus Knowledge Review run containing partial results'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: knowledge-${{ github.ref }}-${{ inputs.source_kind }}-${{ inputs.source_identifier }}-${{ inputs.batch }}
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    if: github.repository == 'Yolol100/transcriberen'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      expected_sources: ${{ steps.plan.outputs.expected_sources }}
+    steps:
+      - name: Checkout immutable requested repository revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Read source from this GitHub repository only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_KIND: ${{ inputs.source_kind }}
+          SOURCE_IDENTIFIER: ${{ inputs.source_identifier }}
+        run: bash scripts/knowledge_source.sh "$SOURCE_KIND" "$SOURCE_IDENTIFIER" "$RUNNER_TEMP/corpus"
+      - name: Validate inventory and plan slices
+        id: plan
+        env:
+          BATCH: ${{ inputs.batch }}
+          SCOPE: ${{ inputs.scope }}
+          SLICE: ${{ inputs.slice }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$BATCH" =~ ^[1-9][0-9]{0,2}$ ]] || exit 2
+          [[ "$SLICE" =~ ^(0|[1-9][0-9]?)$ ]] || exit 2
+          mapfile -t src < "$RUNNER_TEMP/corpus/INPUT-FILES.txt"
+          python scripts/knowledge_analyze.py --source "${src[@]}" --batch "$BATCH" --slice 0 --slice-size 20 --mode inventory --output-dir "$RUNNER_TEMP/plan"
+          python - <<'PY'
+          import hashlib, json, math, os
+          from pathlib import Path
+          inventory=json.loads((Path(os.environ['RUNNER_TEMP'])/'plan/inventory.json').read_text())
+          scope=os.environ['SCOPE']
+          pieces=math.ceil(inventory['actual_batch_count']/20)
+          if scope=='batch': matrix=list(range(pieces))
+          elif scope=='slice':
+              val=int(os.environ['SLICE'])
+              if val >= pieces: raise SystemExit('slice outside selected batch')
+              matrix=[val]
+          else: matrix=[0]
+          sources=json.dumps(inventory['source_files'],sort_keys=True,separators=(',',':'))
+          digest=hashlib.sha256(sources.encode()).hexdigest()
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              print('matrix='+json.dumps(matrix,separators=(',',':')),file=f)
+              print('expected_sources='+digest,file=f)
+          print('planned_slices',matrix,'source_sha',digest)
+          PY
+      - name: Upload inventory receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: knowledge-inventory-${{ github.run_id }}
+          path: ${{ runner.temp }}/plan/inventory.json
+          retention-days: 10
+          if-no-files-found: error
+
+  review:
+    if: inputs.scope != 'inventory' && needs.inventory.result == 'success'
+    needs: inventory
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        slice: ${{ fromJSON(needs.inventory.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout trusted analysis code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Read same immutable GitHub corpus source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_KIND: ${{ inputs.source_kind }}
+          SOURCE_IDENTIFIER: ${{ inputs.source_identifier }}
+        run: bash scripts/knowledge_source.sh "$SOURCE_KIND" "$SOURCE_IDENTIFIER" "$RUNNER_TEMP/corpus"
+      - name: Confirm no corpus mutation since inventory stage
+        env:
+          EXPECTED: ${{ needs.inventory.outputs.expected_sources }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t src < "$RUNNER_TEMP/corpus/INPUT-FILES.txt"
+          python - "$EXPECTED" "${src[@]}" <<'PY'
+          import hashlib,json,pathlib,sys
+          def digest(p):
+              h=hashlib.sha256()
+              with open(p,'rb') as f:
+                  for b in iter(lambda:f.read(1048576),b''): h.update(b)
+              return h.hexdigest()
+          expected=sys.argv[1]
+          paths=[pathlib.Path(x) for x in sys.argv[2:]]
+          info=[{'name':p.name,'sha256':digest(p)} for p in paths]
+          actual=hashlib.sha256(json.dumps(info,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+          if actual != expected: raise SystemExit('source mutated since inventory; fail closed')
+          PY
+      - name: Import validated prior progress, if requested
+        if: inputs.resume_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_RUN: ${{ inputs.resume_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PREVIOUS_RUN" =~ ^[1-9][0-9]{5,15}$ ]] || exit 2
+          run_name="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN" --jq '.name')"
+          test "$run_name" = 'Corpus Knowledge Review' || exit 2
+          mkdir -p "$RUNNER_TEMP/previous"
+          gh run download "$PREVIOUS_RUN" --repo "$GITHUB_REPOSITORY" --pattern 'knowledge-review-batch-*' --dir "$RUNNER_TEMP/previous"
+          mkdir -p "$RUNNER_TEMP/results/videos"
+          find "$RUNNER_TEMP/previous" -type f -path '*/videos/*.json' -print0 | while IFS= read -r -d '' path; do
+            name="$(basename "$path")"
+            [[ "$name" =~ ^[A-Za-z0-9_-]{11}\.json$ ]] || exit 2
+            cp -- "$path" "$RUNNER_TEMP/results/videos/$name"
+          done
+      - name: Install SHA-256 verified inference engine and model
+        run: bash scripts/knowledge_model.sh "$RUNNER_TEMP/inference"
+      - name: Read every transcript chunk and saved comment in the selected slice
+        id: analyze
+        continue-on-error: true
+        env:
+          BATCH: ${{ inputs.batch }}
+          SLICE: ${{ matrix.slice }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t src < "$RUNNER_TEMP/corpus/INPUT-FILES.txt"
+          python scripts/knowledge_analyze.py --source "${src[@]}" --batch "$BATCH" --slice "$SLICE" --slice-size 20 --mode review --model-path "$RUNNER_TEMP/inference/model/model.gguf" --time-budget-seconds 16200 --output-dir "$RUNNER_TEMP/results"
+      - name: Upload compact evidence, never raw source transcripts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: knowledge-review-batch-${{ inputs.batch }}-slice-${{ matrix.slice }}-run-${{ github.run_id }}
+          path: ${{ runner.temp }}/results/
+          retention-days: 10
+          if-no-files-found: warn
+      - name: Fail if model or review did not finish this slice
+        if: steps.analyze.outcome == 'failure'
+        run: exit 1
