@@ -149,6 +149,7 @@ jobs:
         id: plan
         env:
           BATCH: ${{ inputs.batch }}
+          MASTER_SHA: ${{ inputs.master_sha256 }}
           SCOPE: ${{ inputs.scope }}
           SLICE: ${{ inputs.slice }}
         shell: bash
@@ -291,6 +292,7 @@ jobs:
         env:
           BATCH: ${{ inputs.batch }}
           SLICE: ${{ matrix.slice }}
+          MASTER_SHA: ${{ inputs.master_sha256 }}
         shell: bash
         run: |
           set -euo pipefail
