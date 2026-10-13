@@ -1,0 +1,141 @@
+name: ZIP Knowledge Review
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        type: string
+        required: true
+        description: Private GitHub release containing the user ZIP
+      zip_sha256:
+        type: string
+        required: true
+        description: Expected complete ZIP SHA256
+      master_sha256:
+        type: string
+        required: false
+        description: Master SHA256 if archive contains master and shards
+      sources_sha256:
+        type: string
+        required: false
+        description: Optional private Webactueel_Sources.zip checksum
+      batch:
+        type: string
+        required: true
+        default: '1'
+      scope:
+        type: choice
+        options: [inventory, slice, batch]
+        default: inventory
+        required: true
+      slice:
+        type: string
+        default: '0'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      slices: ${{ steps.plan.outputs.slices }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Require private source handling
+        env:
+          PRIVATE: ${{ github.event.repository.private }}
+          PIN: ${{ inputs.zip_sha256 }}
+        run: |
+          test "$PRIVATE" = true || { echo 'BLOCKED: make repository private before reviewing private corpus'; exit 2; }
+          [[ "$PIN" =~ ^[a-f0-9]{64}$ ]] || exit 2
+      - name: Download and check owner ZIP
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+          PIN: ${{ inputs.zip_sha256 }}
+          MASTER: ${{ inputs.master_sha256 }}
+          BATCH: ${{ inputs.batch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/source"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'YouTube_Kennisbron_Bundle.zip' --dir "$RUNNER_TEMP/source"
+          echo "$PIN  $RUNNER_TEMP/source/YouTube_Kennisbron_Bundle.zip" | sha256sum --check --status
+          python scripts/intake.py --zip "$RUNNER_TEMP/source/YouTube_Kennisbron_Bundle.zip" --out "$RUNNER_TEMP/validated" --master-sha256 "$MASTER"
+          mapfile -t sources < "$RUNNER_TEMP/validated/INPUT-FILES.txt"
+          args=()
+          if [[ -n "$MASTER" ]]; then args=(--master-routing "$RUNNER_TEMP/validated/YouTube_Kennisbron_Master.zip" --master-sha256 "$MASTER"); fi
+          python scripts/knowledge_analyze.py --source "${sources[@]}" --mode inventory --batch "$BATCH" --slice 0 --slice-size 20 "${args[@]}" --output-dir "$RUNNER_TEMP/plan"
+          python - "$RUNNER_TEMP/plan/inventory.json" "$GITHUB_OUTPUT" <<'PY'
+          import json,sys
+          inv=json.load(open(sys.argv[1])); count=(inv['actual_batch_count']+19)//20
+          with open(sys.argv[2],'a') as f:f.write('slices='+str(count)+'\n')
+          PY
+  review:
+    needs: inventory
+    if: ${{ inputs.scope != 'inventory' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        slice: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Review selected slice only
+        if: ${{ matrix.slice < fromJSON(needs.inventory.outputs.slices) && (inputs.scope == 'batch' || (inputs.scope == 'slice' && matrix.slice == fromJSON(inputs.slice))) }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+          PIN: ${{ inputs.zip_sha256 }}
+          MASTER: ${{ inputs.master_sha256 }}
+          BATCH: ${{ inputs.batch }}
+          SLICE: ${{ matrix.slice }}
+          SOURCES_PIN: ${{ inputs.sources_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/source"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'YouTube_Kennisbron_Bundle.zip' --dir "$RUNNER_TEMP/source"
+          echo "$PIN  $RUNNER_TEMP/source/YouTube_Kennisbron_Bundle.zip" | sha256sum --check --status
+          python scripts/intake.py --zip "$RUNNER_TEMP/source/YouTube_Kennisbron_Bundle.zip" --out "$RUNNER_TEMP/validated" --master-sha256 "$MASTER"
+          bash scripts/knowledge_model.sh "$RUNNER_TEMP/model"
+          mapfile -t sources < "$RUNNER_TEMP/validated/INPUT-FILES.txt"
+          args=()
+          if [[ -n "$MASTER" ]]; then args=(--master-routing "$RUNNER_TEMP/validated/YouTube_Kennisbron_Master.zip" --master-sha256 "$MASTER"); fi
+          python scripts/knowledge_analyze.py --source "${sources[@]}" --batch "$BATCH" --slice "$SLICE" --slice-size 20 --mode review "${args[@]}" --model-path "$RUNNER_TEMP/model/model/model.gguf" --time-budget-seconds 16200 --output-dir "$RUNNER_TEMP/results"
+          python scripts/knowledge_phase4.py --reviews-dir "$RUNNER_TEMP/results/videos" --out "$RUNNER_TEMP/results/ledger.json"
+          if [[ -n "$SOURCES_PIN" ]]; then
+            [[ "$SOURCES_PIN" =~ ^[a-f0-9]{64}$ ]] || exit 2
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "Webactueel_Sources.zip" --dir "$RUNNER_TEMP/source"
+            echo "$SOURCES_PIN  $RUNNER_TEMP/source/Webactueel_Sources.zip" | sha256sum --check --status
+            python scripts/compare.py --ledger "$RUNNER_TEMP/results/ledger.json" --sources "$RUNNER_TEMP/source/Webactueel_Sources.zip" --out "$RUNNER_TEMP/results/comparison.json"
+          else
+          python scripts/compare.py --ledger "$RUNNER_TEMP/results/ledger.json" --out "$RUNNER_TEMP/results/comparison.json"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ matrix.slice < fromJSON(needs.inventory.outputs.slices) && (inputs.scope == 'batch' || (inputs.scope == 'slice' && matrix.slice == fromJSON(inputs.slice))) }}
+        with:
+          name: review-batch-${{ inputs.batch }}-slice-${{ matrix.slice }}
+          path: |
+            ${{ runner.temp }}/results/inventory.json
+            ${{ runner.temp }}/results/videos/*.json
+            ${{ runner.temp }}/results/ledger.json
+            ${{ runner.temp }}/results/comparison.json
+          retention-days: 7
+          if-no-files-found: error
