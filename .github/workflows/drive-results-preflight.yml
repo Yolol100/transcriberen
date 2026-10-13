@@ -1,0 +1,50 @@
+name: Private Drive Result Write Preflight
+
+# Main only; a PR must NEVER receive OIDC rights to user data.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/drive-results-preflight.yml
+      - scripts/drive_write_probe.py
+      - tests/test_drive_write_probe.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  existing-file-update:
+    if: github.repository == 'Yolol100/transcriberen' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Test private-result writer regression contract
+        run: python -m unittest discover -s tests -p 'test_drive_write_probe.py' -v
+      - name: Obtain ephemeral scoped Google Drive token
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: transcriberen-511520
+          workload_identity_provider: projects/421736271727/locations/global/workloadIdentityPools/github-transcriberen/providers/github-actions
+          service_account: github-transcriberen@transcriberen-511520.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Update and verify pre-created user-owned test JSON only
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          RESULTS_FOLDER_ID: 19JA5uzyohsB23WhErZ4g5xZIaFsLkjXa
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: python scripts/drive_write_probe.py --results-folder-id "$RESULTS_FOLDER_ID" --github-run-id "$GITHUB_RUN_ID"
