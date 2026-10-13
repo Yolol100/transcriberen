@@ -16,6 +16,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from knowledge_analysis.corpus import CorpusError, iter_videos, source_receipt
+from knowledge_analysis.routing import load_master_routing, apply_master_routing
 from knowledge_analysis.review import LocalModel, review_video, STATUS_COMPLETE, STATUS_SOURCE_WARNING, STATUS_NO_TRANSCRIPT_COMMENTS
 
 
@@ -36,6 +37,8 @@ def main() -> int:
     parser.add_argument("--slice", type=int, default=0, help="0-indexed slice within batch")
     parser.add_argument("--slice-size", type=int, default=20)
     parser.add_argument("--mode", choices=("inventory", "review"), default="inventory")
+    parser.add_argument("--master-routing", type=Path, help="Explicit authoritative master ZIP for shard metadata")
+    parser.add_argument("--master-sha256", help="Pinned SHA-256 of the master ZIP")
     parser.add_argument("--model-path", type=Path, help="Required in review mode: verified local GGUF model")
     parser.add_argument("--chunk-size", type=int, default=5600)
     parser.add_argument("--time-budget-seconds", type=int, default=10800)
@@ -50,18 +53,25 @@ def main() -> int:
         parser.error("time budget must be between 120 and 18000 seconds")
     if args.mode == "review" and (not args.model_path or not args.model_path.is_file()):
         parser.error("review requires --model-path pointing to a verified local GGUF file")
+    if bool(args.master_routing) != bool(args.master_sha256):
+        parser.error("--master-routing and --master-sha256 must be supplied together")
+    routing = load_master_routing(args.master_routing, args.master_sha256) if args.master_routing else None
     for src in args.source:
         if not src.is_file() or src.stat().st_size > 1500 * 1024 * 1024:
             parser.error(f"source missing or too large: {src}")
     all_videos = {}
     for src in args.source:
         for item in iter_videos(src):
+            if routing is not None:
+                item = apply_master_routing(item, routing)
             if item.video_id in all_videos:
                 prior = all_videos[item.video_id]
                 if prior.transcript_sha256 != item.transcript_sha256:
                     raise CorpusError("conflicting duplicate video ID: " + item.video_id)
                 raise CorpusError("duplicate video ID across sources: " + item.video_id)
             all_videos[item.video_id] = item
+    if routing is not None and set(all_videos) != set(routing):
+        raise CorpusError("master routing and supplied shard video ID sets differ")
     if len(all_videos) > 25000:
         raise CorpusError("total corpus exceeds the explicit 25,000-record safety limit")
     ordered = [all_videos[key] for key in sorted(all_videos)]
@@ -81,6 +91,7 @@ def main() -> int:
     inventory = {
         "schema_version": "1.0", "scope": "evidence_only",
         "source_files": [{"name": s.name, "sha256": file_hash(s)} for s in args.source],
+        "master_routing_sha256": args.master_sha256 or "",
         "source_receipts": receipts, "source_partial": source_partial,
         "total_unique_videos_in_supplied_corpus": len(ordered), "batch": args.batch,
         "batch_size": 500, "actual_batch_count": len(batch),
