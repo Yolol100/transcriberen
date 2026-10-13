@@ -8,6 +8,7 @@ import csv
 from dataclasses import replace
 import hashlib
 import io
+import json
 from pathlib import Path
 import re
 import zipfile
@@ -119,3 +120,62 @@ def apply_master_routing(video: Video, routing: dict[str, dict]) -> Video:
         raise CorpusError("master routing comment count mismatch: " + video.video_id)
     return replace(video, routes=meta["routes"], authority=meta["authority"],
                    published_date=meta["date"] or video.published_date)
+
+
+SHARD_MANIFEST_NAME = re.compile(r"^YouTube_Kennisbron_Shards_[0-9]{4}-[0-9]{2}-[0-9]{2}\.json$")
+SHARD_ZIP_NAME = re.compile(r"^YouTube_Kennisbron_Master\.part-[0-9]{2}\.zip$")
+
+
+def verify_pinned_shards(master_path: Path, source_paths: list[Path], expected_video_count: int) -> None:
+    """Pin every historical shard to the exact manifest contained in the master.
+
+    SHA/size and complete-file-set checks precede any transcript parsing/model call.
+    """
+    try:
+        with zipfile.ZipFile(master_path) as archive:
+            _safe_zip(archive)
+            matches = [entry for entry in archive.infolist()
+                       if SHARD_MANIFEST_NAME.fullmatch(entry.filename)]
+            if len(matches) != 1 or matches[0].file_size > 2_000_000:
+                raise CorpusError("master requires one bounded shard manifest")
+            manifest = json.loads(archive.read(matches[0]))
+    except (zipfile.BadZipFile, OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise CorpusError("unreadable master shard manifest") from exc
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("parts"), list):
+        raise CorpusError("invalid master shard manifest")
+    parts = manifest["parts"]
+    if not 1 <= len(parts) <= 99 or manifest.get("record_count_total") != expected_video_count:
+        raise CorpusError("master shard count or video total mismatch")
+    expected: dict[str, tuple[int, str]] = {}
+    records_total = 0
+    for part_no, row in enumerate(parts, start=1):
+        if not isinstance(row, dict):
+            raise CorpusError("invalid master shard entry")
+        name = row.get("filename")
+        digest = row.get("zip_sha256")
+        size = row.get("zip_size_bytes")
+        count = row.get("record_count")
+        if (row.get("part") != part_no
+                or not isinstance(name, str)
+                or not SHARD_ZIP_NAME.fullmatch(name)
+                or name != f"YouTube_Kennisbron_Master.part-{part_no:02d}.zip"
+                or not isinstance(digest, str) or not DIGEST.fullmatch(digest)
+                or not isinstance(size, int) or not 1 <= size <= 1_500_000_000
+                or not isinstance(count, int) or not 1 <= count <= 25_000):
+            raise CorpusError("invalid master shard metadata")
+        if name in expected:
+            raise CorpusError("duplicate shard in master manifest")
+        expected[name] = (size, digest)
+        records_total += count
+    if records_total != expected_video_count:
+        raise CorpusError("master shard record count does not match index")
+    paths = [Path(path) for path in source_paths]
+    provided = {path.name: path for path in paths}
+    if len(provided) != len(paths) or set(provided) != set(expected):
+        raise CorpusError("supplied historical shard set differs from pinned master")
+    for name, (size, digest) in expected.items():
+        path = provided[name]
+        if not path.is_file() or path.stat().st_size != size:
+            raise CorpusError("pinned shard missing or wrong size: " + name)
+        if sha256_file(path) != digest:
+            raise CorpusError("pinned shard ZIP SHA-256 mismatch: " + name)
