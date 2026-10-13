@@ -129,3 +129,60 @@ the current primary official source and real runtime scope; then perform
 any authorized project or Skill write through the Webactueel controller.
 Never present this ledger as an AI-vetted source of truth, 18,875 completed
 reviews or authorization to republish caption/comment archives.
+
+
+## Phase 5 — independent end-to-end acceptance and blocked-source handling
+
+A green PR model canary only proves synthetic archive -> pinned localhost
+Qwen3 -> JSON evidence -> non-promoting phase-4 ledger. It does **not**
+prove that the historical corpus has been read, that claims are true or that
+missing/blocked captions/comments have become available.
+
+Before accepting a real owner-authorized corpus run:
+
+1. Reconfirm the **live Project Transcriberen** source-set and authorized
+   Library master version, ZIP SHA-256, master routing and shard-manifest
+   SHA-256s. Do not silently replace project facts with constants from this
+   repository. A public GitHub release of third-party transcripts/comments
+   requires established redistribution rights; without one accepted GitHub
+   source keep the status \`BLOCKED_SOURCE\` and **do not dispatch**.
+2. Match each workflow run to the immutable trusted main SHA, fixed model
+   and inference engine digests, correct authorized source identifier and
+   source receipt. Validate *all* expected logical 500-video batches and
+   20-video slices against a deterministic sorted list of source video IDs,
+   including the smaller final batch. Missing, duplicated, truncated or
+   mismatched slices are **not** successful completion.
+3. For every selected video require the original signed-off source context,
+   exact transcript and saved-comment chunk coverage, checked model output
+   per span, bounded evidence offsets, preserved source integrity statuses
+   and explicit partial/blocked/missing data. The phase-4 ledger now
+   cross-checks saved completed chunks and their claim counters; its
+   \`source_quote_rechecked_against_raw_transcript=false\` remains accurate.
+   A claim cannot be marked independently verified on that basis alone.
+4. Verify unique source IDs, model/route versions, deduplication, no
+   misattributed community comments and no missing chunks. Reconcile
+   claim categories with the current Drive owner source and official
+   primary evidence. \`UPDATE\`, \`ALREADY_COVERED\` and \`REJECTED\`
+   in GitHub remain *proposed* dispositions, not domain acceptances.
+5. A suitable specialist owner must independently approve each proposed
+   project-source change using live source hashes and rollback/readback.
+   Corpus ingestion never automatically writes to a Skill, Project Drive
+   source, user memory, production website or another repository.
+6. Read back all mandatory repository checks on the final **main** commit:
+   Repository Doctor, Toolkit Contract/unittests, Dependency Audit,
+   CodeQL and the PR synthetic local-Qwen3 end-to-end canary. Distinguish
+   PR canary evidence from actual reviewed-corpus production receipts.
+
+**Release decision:** \`CODE_QA_PASS\` is allowed only for the implementation
+with proven checks. \`FULL_CORPUS_ACCEPTED\` requires every source, run,
+video, model and owner-check above. A missing right or GitHub artifact,
+a count shortfall, partial comments/captions, unconfirmed source hashes or
+missing independent approval yields \`NO_GO\` / \`BLOCKED_SOURCE\`
+for the affected completeness or knowledge-promotion claim.
+
+The repository is public and the current workflow uses same-repo artifacts
+or explicitly authorized release assets only. GitHub administration rules
+such as force-push/deletion bypass and review protection require suitable
+GitHub admin readback; a \`protected=true\` branch bit or green Actions
+cannot close the open administrative-governance issue. Never loosen branch
+protection or publish rights-restricted archive bytes as a workaround.
