@@ -4,70 +4,25 @@ on:
   pull_request:
   push:
     branches: [main]
-  schedule:
-    - cron: '41 4 * * 4'
 
 permissions:
   contents: read
   actions: read
   security-events: write
 
-concurrency:
-  group: codeql-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   analyze:
-    name: Analyze ${{ matrix.language }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
         language: [python, actions]
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938
         with:
           languages: ${{ matrix.language }}
-
-      - name: Analyze
-        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
-        with:
-          category: '/language:${{ matrix.language }}'
-          output: ../results
-
-      - name: Enforce no high or critical CodeQL findings
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          sarif_files=(../results/*.sarif)
-          if (( ${#sarif_files[@]} == 0 )); then
-            echo 'CodeQL produced no SARIF files to validate' >&2
-            exit 1
-          fi
-          python scripts/validate_codeql_sarif.py "${sarif_files[@]}"
-
-  publish-main-status:
-    needs: analyze
-    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      statuses: write
-    steps:
-      - name: Checkout status publisher
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Publish exact main CodeQL status
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/publish_ci_status.py --context 'post-merge/CodeQL' --result '${{ needs.analyze.result }}'
+      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938

@@ -1,0 +1,59 @@
+name: Local Qwen3 Synthetic Canary
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - 'knowledge_analysis/**'
+      - '.github/workflows/**'
+      - 'tests/**'
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Start verified local model (no inference API key)
+        run: bash scripts/knowledge_model.sh "$RUNNER_TEMP/model"
+      - name: Create one wholly synthetic caption archive
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib,json,os,pathlib,zipfile
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          text='Make every field label accessible and keyboard friendly. '*12
+          row={'_record_type':'youtube_video','video_id':'ABCDEFGHIJK',
+               'title':'Synthetic fixture','channel':'Synthetic',
+               'transcript':text,'transcript_sha256':hashlib.sha256(text.encode()).hexdigest(),
+               'comments':['This is a saved synthetic comment.'],'comments_status':'ok'}
+          with zipfile.ZipFile(root/'Corpus.zip','w') as z:
+              z.writestr('synthetic.jsonl',json.dumps(row)+'\n')
+          PY
+      - name: Ingest archive and run real model inference
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/intake.py --zip "$RUNNER_TEMP/Corpus.zip" --out "$RUNNER_TEMP/validated"
+          mapfile -t sources < "$RUNNER_TEMP/validated/INPUT-FILES.txt"
+          python scripts/knowledge_analyze.py --source "${sources[@]}" --mode review --batch 1 --slice 0 --slice-size 20 --model-path "$RUNNER_TEMP/model/model/model.gguf" --time-budget-seconds 1200 --output-dir "$RUNNER_TEMP/out"
+          python scripts/knowledge_phase4.py --reviews-dir "$RUNNER_TEMP/out/videos" --out "$RUNNER_TEMP/out/ledger.json"
+          python scripts/compare.py --ledger "$RUNNER_TEMP/out/ledger.json" --out "$RUNNER_TEMP/out/comparison.json"
+          python - <<'PY'
+          import json,os,pathlib
+          base=pathlib.Path(os.environ['RUNNER_TEMP'])/'out'
+          inv=json.loads((base/'inventory.json').read_text())
+          comp=json.loads((base/'comparison.json').read_text())
+          assert inv['ai_reviewed_videos']==1, inv
+          assert comp['auto_promoted'] is False
+          assert comp['human_qa_approved'] is False
+          print('REAL LOCAL QWEN SYNTHETIC CANARY: PASS')
+          PY
