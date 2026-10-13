@@ -117,6 +117,12 @@ def _clean_claims(data: dict, chunk: str, start: int, source: str) -> tuple[list
         if not quote or len(quote) > 110 or quote not in chunk:
             rejected += 1
             continue
+        # Prevent a separate JSON field from leaking a long verbatim transcript
+        # passage despite the explicit 110-character quote limit.
+        if len(claim) > 110 and any(claim[i:i+111] in chunk
+                                    for i in range(len(claim)-110)):
+            rejected += 1
+            continue
         owner = c.get("owner")
         if owner not in OWNERS:
             owner = "unknown"

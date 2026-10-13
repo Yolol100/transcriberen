@@ -16,6 +16,8 @@ MAX_MEMBERS = 35000
 MAX_TOTAL_UNCOMPRESSED = 700 * 1024 * 1024
 MAX_MEMBER = 80 * 1024 * 1024
 MAX_TRANSCRIPT = 2_000_000
+MAX_DECOMPRESSED_TEXT = 600 * 1024 * 1024
+MAX_RECORDS_PER_ARCHIVE = 25000
 MAX_COMMENTS = 250
 
 
@@ -88,7 +90,7 @@ def _comment_texts(value: object) -> tuple[str, ...]:
     if isinstance(value, dict):
         value = value.get("comments", [])
     if not isinstance(value, list):
-        return ()
+        raise CorpusError("invalid comment collection; expected list")
     if len(value) > MAX_COMMENTS:
         raise CorpusError("comment limit exceeded; refuse silent truncation")
     texts = []
@@ -99,7 +101,9 @@ def _comment_texts(value: object) -> tuple[str, ...]:
             text = next((item[k] for k in ("text", "content", "comment", "body")
                          if isinstance(item.get(k), str)), "")
         else:
-            continue
+            raise CorpusError("unreadable comment entry")
+        if not isinstance(text, str) or not text.strip():
+            raise CorpusError("nontext or empty comment entry")
         if len(text) > 12000:
             raise CorpusError("oversized comment; refuse silent truncation")
         if text.strip():
@@ -127,8 +131,9 @@ def _record_to_video(row: dict, provenance: str) -> Video:
             raise CorpusError(f"transcript SHA mismatch for {video_id}")
     comments_raw = row.get("comments", [])
     comments = _comment_texts(comments_raw)
-    if isinstance(comments_raw, list) and comments_raw and not comments:
-        raise CorpusError(f"unreadable nonempty comments for {video_id}")
+    declared_comment_count = row.get("comment_count")
+    if not comments and isinstance(declared_comment_count, int) and declared_comment_count > 0:
+        raise CorpusError(f"claimed comments missing in {video_id}")
     status = str(row.get("comments_status") or row.get("comment_parse_status") or "unknown")
     return Video(
         video_id=video_id,
@@ -149,7 +154,11 @@ def _record_to_video(row: dict, provenance: str) -> Video:
 
 
 def _iter_jsonl(fileobj: object, provenance: str) -> Iterator[Video]:
+    expanded_bytes = 0
     for number, raw in enumerate(fileobj, start=1):
+        expanded_bytes += len(raw)
+        if expanded_bytes > MAX_DECOMPRESSED_TEXT or number > MAX_RECORDS_PER_ARCHIVE:
+            raise CorpusError(f"expanded corpus exceeds limits at {provenance}:{number}")
         if len(raw) > MAX_TRANSCRIPT * 2:
             raise CorpusError(f"oversized record at {provenance}:{number}")
         row = json.loads(raw)
@@ -219,3 +228,31 @@ def iter_videos(path: Path) -> Iterator[Video]:
             row["comments"] = comments
             row["comments_status"] = comments.get("status", "unknown")
             yield _record_to_video(row, f"{path.name}/{base}")
+
+
+def source_receipt(path: Path) -> dict:
+    """Source completeness metadata, without making any promotion claims."""
+    path = Path(path)
+    if path.suffix != ".zip":
+        return {"kind": "local_jsonl", "status": "evidence_only", "unresolved_count": 0}
+    with zipfile.ZipFile(path) as z:
+        _safe_zip(z)
+        names = set(z.namelist())
+        if "manifest.json" not in names:
+            return {"kind": "legacy_library_shard", "status": "historical_evidence_only", "unresolved_count": 0}
+        manifest = json.loads(z.read("manifest.json"))
+        result = json.loads(z.read("result.json")) if "result.json" in names else {}
+        unresolved = manifest.get("unresolved", [])
+        if not isinstance(unresolved, list):
+            raise CorpusError("unresolved source metadata is malformed")
+        reasons = manifest.get("partial_reasons", [])
+        if not isinstance(reasons, list):
+            raise CorpusError("partial reasons metadata is malformed")
+        status = str(result.get("status") or manifest.get("status") or "unknown")
+        return {
+            "kind": "channel_corpus", "status": status,
+            "unresolved_count": len(unresolved),
+            "partial_reasons": [str(v)[:200] for v in reasons[:100]],
+            "counts": manifest.get("counts", {}) if isinstance(manifest.get("counts", {}), dict) else {},
+            "source_partial": status != "ok" or bool(unresolved) or bool(reasons),
+        }

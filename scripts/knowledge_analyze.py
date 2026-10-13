@@ -15,7 +15,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from knowledge_analysis.corpus import CorpusError, iter_videos
+from knowledge_analysis.corpus import CorpusError, iter_videos, source_receipt
 from knowledge_analysis.review import LocalModel, review_video, STATUS_COMPLETE, STATUS_SOURCE_WARNING, STATUS_NO_TRANSCRIPT_COMMENTS
 
 
@@ -62,6 +62,8 @@ def main() -> int:
                     raise CorpusError("conflicting duplicate video ID: " + item.video_id)
                 raise CorpusError("duplicate video ID across sources: " + item.video_id)
             all_videos[item.video_id] = item
+    if len(all_videos) > 25000:
+        raise CorpusError("total corpus exceeds the explicit 25,000-record safety limit")
     ordered = [all_videos[key] for key in sorted(all_videos)]
     start = (args.batch - 1) * 500
     end = min(len(ordered), start + 500)
@@ -74,14 +76,17 @@ def main() -> int:
         raise CorpusError("selected slice outside selected batch")
     out = args.output_dir
     out.mkdir(parents=True, exist_ok=True)
+    receipts = [{"file_name": src.name, **source_receipt(src)} for src in args.source]
+    source_partial = any(x.get("source_partial", False) for x in receipts)
     inventory = {
         "schema_version": "1.0", "scope": "evidence_only",
         "source_files": [{"name": s.name, "sha256": file_hash(s)} for s in args.source],
+        "source_receipts": receipts, "source_partial": source_partial,
         "total_unique_videos_in_supplied_corpus": len(ordered), "batch": args.batch,
         "batch_size": 500, "actual_batch_count": len(batch),
         "slice_index": args.slice, "slice_size": args.slice_size,
         "selected_video_ids": [v.video_id for v in selected],
-        "status": "inventory_only" if args.mode == "inventory" else "review_running",
+        "status": ("inventory_only_source_partial" if source_partial else "inventory_only") if args.mode == "inventory" else "review_running",
     }
     (out / "inventory.json").write_text(json.dumps(inventory, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if args.mode == "inventory":
@@ -99,7 +104,7 @@ def main() -> int:
                               out_dir=out, chunk_size=args.chunk_size, deadline=deadline)
         counts[result["status"]] += 1
     inventory.update({
-        "status": "evidence_only_pending_external_qa",
+        "status": "evidence_only_source_partial" if source_partial else "evidence_only_pending_external_qa",
         "model_sha256": model_sha, "statuses": dict(counts),
         "ai_reviewed_videos": counts[STATUS_COMPLETE] + counts[STATUS_SOURCE_WARNING],
         "source_integrity_warning_videos": counts[STATUS_SOURCE_WARNING],

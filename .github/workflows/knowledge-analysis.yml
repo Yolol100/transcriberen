@@ -229,11 +229,13 @@ jobs:
           actual=hashlib.sha256(json.dumps(info,sort_keys=True,separators=(',',':')).encode()).hexdigest()
           if actual != expected: raise SystemExit('source mutated since inventory; fail closed')
           PY
-      - name: Import validated prior progress, if requested
+      - name: Import only this slice's prior evidence, if requested
         if: inputs.resume_run_id != ''
         env:
           GH_TOKEN: ${{ github.token }}
           PREVIOUS_RUN: ${{ inputs.resume_run_id }}
+          BATCH: ${{ inputs.batch }}
+          SLICE: ${{ matrix.slice }}
         shell: bash
         run: |
           set -euo pipefail
@@ -242,12 +244,28 @@ jobs:
           test "$run_name" = 'Corpus Knowledge Review' || exit 2
           mkdir -p "$RUNNER_TEMP/previous"
           gh run download "$PREVIOUS_RUN" --repo "$GITHUB_REPOSITORY" --pattern 'knowledge-review-batch-*' --dir "$RUNNER_TEMP/previous"
-          mkdir -p "$RUNNER_TEMP/results/videos"
-          find "$RUNNER_TEMP/previous" -type f -path '*/videos/*.json' -print0 | while IFS= read -r -d '' path; do
-            name="$(basename "$path")"
-            [[ "$name" =~ ^[A-Za-z0-9_-]{11}\.json$ ]] || exit 2
-            cp -- "$path" "$RUNNER_TEMP/results/videos/$name"
-          done
+          mapfile -t src < "$RUNNER_TEMP/corpus/INPUT-FILES.txt"
+          python scripts/knowledge_analyze.py --source "${src[@]}" --mode inventory --batch "$BATCH" --slice "$SLICE" --slice-size 20 --output-dir "$RUNNER_TEMP/selected"
+          python - <<'PY_RESUME'
+          import json,os,pathlib,shutil
+          temp=pathlib.Path(os.environ['RUNNER_TEMP'])
+          selected=set(json.loads((temp/'selected/inventory.json').read_text())['selected_video_ids'])
+          dest=temp/'results/videos'
+          dest.mkdir(parents=True,exist_ok=True)
+          restored=set()
+          for candidate in (temp/'previous').rglob('videos/*.json'):
+            if candidate.stem not in selected:
+              continue
+            data=json.loads(candidate.read_text(encoding='utf-8'))
+            if data.get('video_id') != candidate.stem:
+              raise SystemExit('foreign or malformed prior video identity')
+            target=dest/candidate.name
+            if target.exists() and target.read_bytes()!=candidate.read_bytes():
+              raise SystemExit('conflicting prior evidence for same video ID')
+            shutil.copyfile(candidate,target)
+            restored.add(candidate.stem)
+          print('selected',len(selected),'restored',len(restored))
+          PY_RESUME
       - name: Restore verified local-model downloads (GitHub cache only)
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:

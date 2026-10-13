@@ -4,6 +4,8 @@ This is a **GitHub-hosted execution** extension. It never changes channel acquis
 
 ## What actually runs
 
+Unlike **new acquisition**, which remains limited to 2026 videos and 7 newly fetched comments, **retrospective analysis of owner-supplied archive evidence intentionally includes older years and every already-saved comment (subject to safe size limits)**. This never expands YouTube network acquisition.
+
 The manually dispatched `Corpus Knowledge Review` GitHub Action downloads a prior `Transcribe Public Source` artifact from **this** repository, or a ZIP shard collection deliberately published to a same-repository GitHub Release by its owner. It validates ZIP member paths and per-video identifiers, checks transcript hashes and selects a deterministic logical batch of **500 unique video IDs**. Each batch is divided into retryable slices of 20 videos (at most four concurrent jobs).
 
 In `review` mode the GitHub-hosted runner downloads SHA-256 verified `llama.cpp` (`b11425`, `6a47856d08ecc4030b2fa8b8bf761c96d142d689567f69a0f75e42de430dc34c`) from GitHub and the public Apache-2.0 `ggml-org/Qwen3-1.7B-GGUF` Q4_K_M model (`d2387ca2dbfee2ffabce7120d3770dadca0b293052bc2f0e138fdc940d9bc7b5`). Model inference occurs on the runner itself at `127.0.0.1`. The weights are a public anonymous **dependency download**, not a hosted inference service or additional account. A missing download or checksum mismatch is a blocker, never grounds for sending input to a different service.
@@ -29,6 +31,8 @@ In `review` mode the GitHub-hosted runner downloads SHA-256 verified `llama.cpp`
 - `blocked_local_model` / `blocked_time_budget`: partial evidence, safe retry needed.
 
 Some older Library shard records embed extra timestamped transcript material. Their recorded original transcript SHA-256 can differ from the SHA-256 of the complete inline text (2,160 of 3,201 records in a checked shard). The importer preserves BOTH hashes and records an explicit `legacy_claim_mismatch` warning rather than silently changing source material or aborting every unrelated video.
+
+Channel source manifests with `partial`/`access_blocked` statuses preserve unresolved counts and partial reasons in `inventory.json`. Their valid saved transcripts may be examined, but the source never becomes falsely complete.
 
 The module **never** automatically writes to Google Drive, a live Skill, a project source or any production website. Creator claims, comment complaints and AI-generated suggestions remain hypotheses. The repo has no private Library, live Drive project comparison or independent official source validation mechanism. `webactueel-workflow` and the relevant specialist must review and accept any knowledge changes elsewhere, with source provenance and current official documentation.
 

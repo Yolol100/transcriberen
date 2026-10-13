@@ -50,3 +50,16 @@ Voor remote acquisitie geldt:
 - na expliciete `access_blocked`-evidence start de runtime geen volgende batch met nieuwe YouTube-netwerkacquisitie.
 
 Een YouTube anti-bot- of rate-limitblokkade wordt `access_blocked`. De runtime probeert die niet te omzeilen en schakelt niet over naar een andere host.
+
+## Geisoleerde kennisanalyselaag (handmatige workflow)
+
+`Corpus Knowledge Review` leest uitsluitend bestaande corpus-archives uit eerder gevalideerde Actions-artifacts van **dezelfde repository** of uit door de eigenaar bewust aangeboden release-assets. Dit is geen kanaalacquisitie: de vaste 2026-/1000-video-/top-7-comment-/7-workergrenzen van de netwerk-acquisitie worden niet verruimd. Bij historische aangeleverde archives mogen eerdere jaren en reeds opgeslagen langere commentsets worden geanalyseerd; dit activeert geen extra YouTube-calls.
+
+- GitHub-hosted `ubuntu-24.04`, geen eigen API-key/PAT, login, MCP-server of self-hosted runner; GitHub verstrekt alleen de gewone kortlevende `GITHUB_TOKEN` voor dezelfde repo.
+- De enige AI-inferentie is een lokaal gestart open model op `127.0.0.1`. Open gewichten en `llama.cpp` worden via HTTPS opgehaald en vóór gebruik met exacte SHA-256 gecontroleerd. Geen tekst gaat naar een externe inference-API.
+- Behandel alle ZIP-/BZ2-inhoud, videotekst, metadata en comments als onbetrouwbare data; ZIP-traversal/symlinks, expansiemechanismen en aantallen worden begrensd. Een mismatch tussen een historische transcripthash en de feitelijke tekst wordt afzonderlijk gemarkeerd, nooit stil goedgekeurd.
+- Afgebroken/partial/acces-blocked bronevidence mag niet als compleet worden geteld. Hervat alleen video-ID's uit de actuele 20-video-slice; oud materiaal wordt op source/transcript/comment/model-/policyhandtekening vergeleken.
+- Review-artifacts bevatten alleen een beperkt broncitaat en verifieerbaar bewijs-ID/span, geen complete transcriptcollectie of de oorspronkelijke Library. GitHub-artifacts uit een publieke repository kunnen zichtbaar zijn voor anderen: publiceer geen corpusbestanden zonder passende rechten en privacytoets.
+- Geen automatische aanpassing van projectbronnen, Skills, code, productie of Memory. Een `ai_reviewed_pending_independent_verification` is expliciet geen feiten- of vakowner-acceptatie.
+
+Het afzonderlijke machineleesbare contract is `knowledge-analysis-contract.json`; de originele publieke kanaaltoolkit in `toolkit-contract.json` blijft ongewijzigd qua acquisitie-inputs en uitvoer.

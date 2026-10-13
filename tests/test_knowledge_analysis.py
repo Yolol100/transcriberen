@@ -8,7 +8,7 @@ import tempfile
 import unittest
 import zipfile
 
-from knowledge_analysis.corpus import CorpusError, iter_videos, sha256, Video
+from knowledge_analysis.corpus import CorpusError, iter_videos, sha256, Video, source_receipt
 from knowledge_analysis.review import (split_exact, review_video, signature,
                                         STATUS_COMPLETE, InferenceError, LocalModel)
 
@@ -95,6 +95,48 @@ class CorpusTests(unittest.TestCase):
                 out.writestr("../evil.jsonl", "{}\n")
             with self.assertRaises(CorpusError):
                 list(iter_videos(z))
+
+    def test_channel_partial_manifest_receipt(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "channel.zip"
+            with zipfile.ZipFile(path, "w") as z:
+                z.writestr("manifest.json", json.dumps({"items": [], "unresolved": [
+                    {"video_id": "ABCDEFGHIJK", "status": "access_blocked"}],
+                    "partial_reasons": ["access_blocked"]}))
+                z.writestr("result.json", json.dumps({"status": "partial"}))
+            info = source_receipt(path)
+            self.assertTrue(info["source_partial"])
+            self.assertEqual(info["unresolved_count"], 1)
+            self.assertEqual(info["status"], "partial")
+
+    def test_rejects_unreadable_wrapped_comments(self):
+        with tempfile.TemporaryDirectory() as d:
+            z = Path(d) / "part.zip"
+            data = record()
+            data["comments"] = {"comments": [{"unknown_field": "text"}]}
+            write_shard(z, [data])
+            with self.assertRaisesRegex(CorpusError, "nontext or empty comment"):
+                list(iter_videos(z))
+
+    def test_long_verbatim_claim_is_rejected(self):
+        from knowledge_analysis.review import _clean_claims
+        raw = "You should always compare the final recorded state against independent evidence, not merely trust the tool output. " * 2
+        quote = raw[:60]
+        claims, rejected = _clean_claims({"claims": [{"claim": raw[:130], "quote": quote}]}, raw, 0, "transcript")
+        self.assertEqual((claims, rejected), ([], 1))
+
+    def test_nested_decompression_budget_rejects_too_many_records(self):
+        from knowledge_analysis import corpus
+        previous = corpus.MAX_RECORDS_PER_ARCHIVE
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d)/"many.zip"
+            write_shard(path, [record(), record(id="LMNOPQRSTUV")])
+            try:
+                corpus.MAX_RECORDS_PER_ARCHIVE = 1
+                with self.assertRaisesRegex(CorpusError, "expanded corpus exceeds"):
+                    list(iter_videos(path))
+            finally:
+                corpus.MAX_RECORDS_PER_ARCHIVE = previous
 
     def test_channel_format(self):
         with tempfile.TemporaryDirectory() as d:
