@@ -220,6 +220,13 @@ def _valid_prior(prior: dict, tasks: list[tuple], *, expected_status: str) -> bo
         actual_claim_counts[matches[0]] += 1
     if any(actual_claim_counts[key] != expected_claim_counts[key] for key in seen):
         return False
+    # A corrupt restored counter must not cause TypeError when processing the
+    # next chunk; recomputing it from checked spans also prevents false totals.
+    rejection_counter = prior.get("rejected_unanchored_claims")
+    if type(rejection_counter) is not int or rejection_counter < 0:
+        return False
+    if rejection_counter != sum(item["rejected_claims"] for item in prior["chunks"]):
+        return False
     if complete and seen != set(expected):
         return False
     if complete and status != "no_transcript":

@@ -269,6 +269,26 @@ class CorpusTests(unittest.TestCase):
             self.assertEqual(len(fresh.calls), len(actual["chunks"]))
             self.assertNotIn("resumed", actual)
 
+    def test_corrupted_rejection_counter_cannot_crash_resumed_review(self):
+        t = "A meaningful discussion of responsive forms and accessibility. " * 28
+        video = Video("ABCDEFGHIJK", "A", "B", "", "", "unknown", (), t,
+                      (), sha256(t), "ok", "fixture")
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d)/"videos"/"ABCDEFGHIJK.json"
+            prior = review_video(video, model=FakeModel(), model_sha256="d"*64,
+                                 out_dir=Path(d), chunk_size=510)
+            prior["status"] = "review_in_progress"
+            prior["chunks"] = prior["chunks"][:1]
+            prior["claims"] = prior["claims"][:1]
+            prior["rejected_unanchored_claims"] = "invalid"
+            path.write_text(json.dumps(prior))
+            fake = FakeModel()
+            actual = review_video(video, model=fake, model_sha256="d"*64,
+                                  out_dir=Path(d), chunk_size=510)
+            self.assertEqual(actual["status"], STATUS_COMPLETE)
+            self.assertEqual(len(fake.calls), len(actual["chunks"]))
+            self.assertNotIn("resumed", actual)
+
     def test_missing_saved_claim_for_processed_chunk_forces_rereview(self):
         t = "A concrete explanation of accessible mobile controls for real users. " * 24
         video = Video("ABCDEFGHIJK", "A", "B", "", "", "unknown", (), t,
