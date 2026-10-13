@@ -17,7 +17,7 @@ RUN = {
     "head_branch": "runtime-requests",
     "status": "completed",
     "conclusion": "success",
-    "path": ".github/workflows/transcribe.yml@refs/heads/runtime-requests",
+    "path": ".github/workflows/transcribe.yml",
 }
 
 MOCK_GH = """#!/usr/bin/env python3
