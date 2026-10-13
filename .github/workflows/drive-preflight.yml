@@ -1,0 +1,49 @@
+name: Private Drive OIDC Preflight
+
+# Trusted main only. Never hand private source access to PR code.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/drive-preflight.yml
+      - scripts/drive_preflight.py
+      - tests/test_drive_preflight.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-drive-preflight:
+    if: github.ref == 'refs/heads/main' && github.repository == 'Yolol100/transcriberen'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Test Drive metadata fail-closed behavior
+        run: python -m unittest discover -s tests -p 'test_drive_preflight.py' -v
+      - name: Obtain short-lived read-only Drive token
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: transcriberen-511520
+          workload_identity_provider: projects/421736271727/locations/global/workloadIdentityPools/github-transcriberen/providers/github-actions
+          service_account: github-transcriberen@transcriberen-511520.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive.readonly
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Check source inventory and master checksum (no corpus uploads)
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          DRIVE_FOLDER_ID: 14x-AIfgB67Osvt4W_VymAV7jUSqdKaPL
+        run: python scripts/drive_preflight.py --folder-id "$DRIVE_FOLDER_ID"
