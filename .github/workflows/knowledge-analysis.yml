@@ -158,7 +158,12 @@ jobs:
           [[ "$BATCH" =~ ^[1-9][0-9]{0,2}$ ]] || exit 2
           [[ "$SLICE" =~ ^(0|[1-9][0-9]?)$ ]] || exit 2
           mapfile -t src < "$RUNNER_TEMP/corpus/INPUT-FILES.txt"
-          python scripts/knowledge_analyze.py --source "${src[@]}" --batch "$BATCH" --slice 0 --slice-size 20 --mode inventory --master-routing "$RUNNER_TEMP/corpus/YouTube_Kennisbron_Master.zip" --master-sha256 "$MASTER_SHA" --output-dir "$RUNNER_TEMP/plan"
+          master_args=()
+          if [[ "${{ inputs.source_kind }}" == release ]]; then
+            test -n "$MASTER_SHA" || { echo "release master SHA is required" >&2; exit 2; }
+            master_args=(--master-routing "$RUNNER_TEMP/corpus/YouTube_Kennisbron_Master.zip" --master-sha256 "$MASTER_SHA")
+          fi
+          python scripts/knowledge_analyze.py --source "${src[@]}" --batch "$BATCH" --slice 0 --slice-size 20 --mode inventory "${master_args[@]}" --output-dir "$RUNNER_TEMP/plan"
           python - <<'PY'
           import hashlib, json, math, os
           from pathlib import Path
@@ -241,6 +246,7 @@ jobs:
           PREVIOUS_RUN: ${{ inputs.resume_run_id }}
           BATCH: ${{ inputs.batch }}
           SLICE: ${{ matrix.slice }}
+          MASTER_SHA: ${{ inputs.master_sha256 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -256,7 +262,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/previous"
           gh run download "$PREVIOUS_RUN" --repo "$GITHUB_REPOSITORY" --pattern 'knowledge-review-batch-*' --dir "$RUNNER_TEMP/previous"
           mapfile -t src < "$RUNNER_TEMP/corpus/INPUT-FILES.txt"
-          python scripts/knowledge_analyze.py --source "${src[@]}" --mode inventory --batch "$BATCH" --slice "$SLICE" --slice-size 20 --output-dir "$RUNNER_TEMP/selected"
+          master_args=()
+          if [[ "${{ inputs.source_kind }}" == release ]]; then
+            test -n "$MASTER_SHA" || exit 2
+            master_args=(--master-routing "$RUNNER_TEMP/corpus/YouTube_Kennisbron_Master.zip" --master-sha256 "$MASTER_SHA")
+          fi
+          python scripts/knowledge_analyze.py --source "${src[@]}" --mode inventory --batch "$BATCH" --slice "$SLICE" --slice-size 20 "${master_args[@]}" --output-dir "$RUNNER_TEMP/selected"
           python - <<'PY_RESUME'
           import json,os,pathlib,shutil
           temp=pathlib.Path(os.environ['RUNNER_TEMP'])
@@ -297,7 +308,12 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t src < "$RUNNER_TEMP/corpus/INPUT-FILES.txt"
-          python scripts/knowledge_analyze.py --source "${src[@]}" --batch "$BATCH" --slice "$SLICE" --slice-size 20 --mode review --model-path "$RUNNER_TEMP/inference/model/model.gguf" --time-budget-seconds 16200 --output-dir "$RUNNER_TEMP/results"
+          master_args=()
+          if [[ "${{ inputs.source_kind }}" == release ]]; then
+            test -n "$MASTER_SHA" || exit 2
+            master_args=(--master-routing "$RUNNER_TEMP/corpus/YouTube_Kennisbron_Master.zip" --master-sha256 "$MASTER_SHA")
+          fi
+          python scripts/knowledge_analyze.py --source "${src[@]}" --batch "$BATCH" --slice "$SLICE" --slice-size 20 --mode review "${master_args[@]}" --model-path "$RUNNER_TEMP/inference/model/model.gguf" --time-budget-seconds 16200 --output-dir "$RUNNER_TEMP/results"
       - name: Upload compact evidence, never raw source transcripts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
