@@ -38,3 +38,6 @@ Bouw vóór niet-triviale bronwijzigingen een begrensde impactcontext uit gewijz
 
 GitHub Trending en externe repositories zijn alleen discovery-signalen. Distilleer patronen en verifieer die daarna tegen het ownercontract, actuele primaire/officiële documentatie en lokale regressie-evidence. Kopieer geen code, prompts, assets of configuratie zonder compatibele gebruiksrechten en een expliciete repositoryreden.
 
+## Separate evidence-only knowledge review
+
+The existing **network acquisition contract remains channel-only**. The optional manual `Corpus Knowledge Review` workflow is permitted only to read already available GitHub-hosted corpus artifacts or owner-authorized release assets, run SHA-256-pinned local AI on GitHub-hosted runners, and write ephemeral evidence artifacts. It never queries new YouTube URLs, uses a user-managed key/account/MCP, copies the private Library to `main`, or promotes model output into a Skill/project source. An `ai_reviewed_pending_independent_verification` result is not expert acceptance. Preserve exact source hashes, missing/partial statuses and the reviewer's authorization boundary.

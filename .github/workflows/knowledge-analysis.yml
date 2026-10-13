@@ -66,8 +66,15 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
+      - name: Restore verified local-model downloads (GitHub cache only)
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ${{ runner.temp }}/inference/llama.tar.gz
+            ${{ runner.temp }}/inference/model/model.gguf
+          key: local-qwen3-1p7b-q4-llama-b11425-sha256-v1
       - name: Verify pinned binary/model and start local inference
-        run: bash scripts/knowledge_model.sh "$RUNNER_TEMP/local-model"
+        run: bash scripts/knowledge_model.sh "$RUNNER_TEMP/inference"
       - name: Confirm local LLM speaks strict JSON
         shell: bash
         run: |
@@ -80,6 +87,38 @@ jobs:
           assert isinstance(result.get("claims"), list), "local model failed schema smoke"
           print("Local model returned a JSON claims array; no external inference service used")
           PY_CANARY
+      - name: E2E fixture from archive to persisted source-anchored video review
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fixture"
+          python - <<'PY_FIXTURE'
+          import hashlib,json,os,pathlib,zipfile
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'fixture'
+          text=('Accessible checkout forms need clear labels and visible validation errors. '
+                'Check the keyboard-only journey and make errors repairable.')
+          meta={'video_id':'ABCDEFGHIJK', 'title':'Generic accessibility fixture',
+                'url':'https://www.youtube.com/watch?v=ABCDEFGHIJK',
+                'transcript_status':'ok', 'transcript_sha256':hashlib.sha256(text.encode()).hexdigest(),
+                'upload_date':'20261013'}
+          path=root/'channel-corpus.zip'
+          with zipfile.ZipFile(path,'w') as z:
+            z.writestr('manifest.json',json.dumps({'items':[meta]}))
+            z.writestr('videos/ABCDEFGHIJK/metadata.json',json.dumps(meta))
+            z.writestr('videos/ABCDEFGHIJK/comments.json',json.dumps({'status':'ok','comments':[{'text':'Please include larger touch targets for mobile customers.'}]}))
+            z.writestr('videos/ABCDEFGHIJK/transcript.txt',text)
+          PY_FIXTURE
+          python scripts/knowledge_analyze.py --source "$RUNNER_TEMP/fixture/channel-corpus.zip" --mode review --batch 1 --slice 0 --slice-size 20 --model-path "$RUNNER_TEMP/inference/model/model.gguf" --output-dir "$RUNNER_TEMP/e2e"
+          python - <<'PY_ASSERT'
+          import json,os,pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'e2e'
+          inventory=json.loads((root/'inventory.json').read_text())
+          result=json.loads((root/'videos/ABCDEFGHIJK.json').read_text())
+          assert inventory['ai_reviewed_videos']==1, inventory
+          assert result['transcript_read_completely'] and result['comments_read_completely'], result
+          assert result['auto_promoted'] is False and result['human_qa_approved'] is False
+          print('End-to-end archive -> local AI -> JSON progress: PASS')
+          PY_ASSERT
   inventory:
     if: github.event_name == 'workflow_dispatch' && github.repository == 'Yolol100/transcriberen'
     runs-on: ubuntu-24.04
@@ -209,6 +248,13 @@ jobs:
             [[ "$name" =~ ^[A-Za-z0-9_-]{11}\.json$ ]] || exit 2
             cp -- "$path" "$RUNNER_TEMP/results/videos/$name"
           done
+      - name: Restore verified local-model downloads (GitHub cache only)
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ${{ runner.temp }}/inference/llama.tar.gz
+            ${{ runner.temp }}/inference/model/model.gguf
+          key: local-qwen3-1p7b-q4-llama-b11425-sha256-v1
       - name: Install SHA-256 verified inference engine and model
         run: bash scripts/knowledge_model.sh "$RUNNER_TEMP/inference"
       - name: Read every transcript chunk and saved comment in the selected slice

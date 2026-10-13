@@ -8,12 +8,16 @@ RUNTIME_SHA='6a47856d08ecc4030b2fa8b8bf761c96d142d689567f69a0f75e42de430dc34c'
 # GGUF weights are anonymously publicly downloadable. They are NOT a hosted inference API.
 MODEL_URL='https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf'
 MODEL_SHA='d2387ca2dbfee2ffabce7120d3770dadca0b293052bc2f0e138fdc940d9bc7b5'
-curl --fail --location --proto-redir '=https' --retry 3 --max-time 1200 --proto '=https' --tlsv1.2 --output "$DEST/llama.tar.gz" "$RUNTIME_URL"
+if ! echo "$RUNTIME_SHA  $DEST/llama.tar.gz" | sha256sum --check --status 2>/dev/null; then
+  curl --fail --location --proto-redir '=https' --retry 3 --max-time 1200 --proto '=https' --tlsv1.2 --output "$DEST/llama.tar.gz" "$RUNTIME_URL"
+fi
 echo "$RUNTIME_SHA  $DEST/llama.tar.gz" | sha256sum --check --status || { echo 'llama release hash mismatch' >&2; exit 2; }
 tar -tzf "$DEST/llama.tar.gz" > "$DEST/llama-members.txt"
 grep -Eq '(^|/)llama-server$' "$DEST/llama-members.txt" || { echo 'llama-server binary not found in pinned release' >&2; exit 2; }
 tar -xzf "$DEST/llama.tar.gz" -C "$DEST/llama" --no-same-owner --no-same-permissions
-curl --fail --location --proto-redir '=https' --retry 3 --max-time 2400 --proto '=https' --tlsv1.2 --output "$DEST/model/model.gguf" "$MODEL_URL"
+if ! echo "$MODEL_SHA  $DEST/model/model.gguf" | sha256sum --check --status 2>/dev/null; then
+  curl --fail --location --proto-redir '=https' --retry 3 --max-time 2400 --proto '=https' --tlsv1.2 --output "$DEST/model/model.gguf" "$MODEL_URL"
+fi
 echo "$MODEL_SHA  $DEST/model/model.gguf" | sha256sum --check --status || { echo 'GGUF model hash mismatch' >&2; exit 2; }
 SERVER="$(find "$DEST/llama" -type f -name 'llama-server' -print -quit)"
 test -n "$SERVER" || exit 2

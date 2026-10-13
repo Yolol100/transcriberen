@@ -156,3 +156,7 @@ Transcripts en comments zijn evidence/discovery-input. Deze repo promoot niets a
 ## Licentie
 
 Deze repository bevat momenteel geen open-sourcelicentie. Hergebruik, distributie of afgeleide werken zijn niet toegestaan zonder expliciete toestemming van de rechthebbende.
+
+## GitHub-only corpus knowledge review (optional)
+
+A separate manual `Corpus Knowledge Review` workflow can semantically inspect **existing** caption/comment ZIP evidence in 500-video batches, with locally executed, checksum-pinned open model weights and resumable 20-video slices. No OpenAI API key, extra user account, external inference service, MCP server, or self-hosted machine is required. It never changes public YouTube acquisition or automatically updates Skills/project sources. See [docs/KNOWLEDGE-ANALYSIS.md](docs/KNOWLEDGE-ANALYSIS.md). **A supplied corpus inside GitHub is required; this repo cannot directly read private ChatGPT Library files.**

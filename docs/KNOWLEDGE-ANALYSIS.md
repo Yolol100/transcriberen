@@ -30,6 +30,10 @@ The module **never** automatically writes to Google Drive, a live Skill, a proje
 
 Each artifact holds only short evidence snippets (maximum 110 characters), metadata, source IDs, SHA-256s, offsets, status and reviewer warnings. Raw transcripts and comment collections are not committed to `main` or included in review outputs. GitHub Actions artifacts and release assets from public repositories can be accessible to other readers: apply privacy/copyright restrictions before publishing source ZIPs.
 
+## Validated release regression
+
+Pull-request CI runs a SHA-pinned local-model canary plus an end-to-end synthetic ZIP input through `scripts/knowledge_analyze.py` and confirms that transcript and comment chunks reach persisted JSON evidence. The model binaries/weights use a GitHub Actions cache, and hashes are revalidated on every use. This tests functional local inference but does not validate the 18,875-video corpus or expert accuracy.
+
 ## Limits
 
 The public GitHub standard `ubuntu-24.04` runner has 4 CPUs and 16 GB RAM; local 1.7B-model inference is slower and less reliable than larger hosted models. There is a six-hour maximum job duration; each slice has a shorter explicit time budget and records resumable partial checkpoints. Inference source accuracy is not guaranteed: independent QA remains mandatory for any material source/Skill update.
