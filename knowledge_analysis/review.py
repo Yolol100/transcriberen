@@ -54,6 +54,7 @@ def signature(video: Video, model_sha256: str, chunk_size: int = 5600) -> str:
         "transcript_hash_claim": video.transcript_hash_claim,
         "transcript_hash_status": video.transcript_hash_status,
         "comments_sha256": sha256(json.dumps(video.comments, ensure_ascii=False)),
+        "comments_status": video.comments_status,
         "model_sha256": model_sha256, "chunk_size": chunk_size,
         # The model sees these fields; changing them invalidates prior inference.
         "model_context": {
@@ -170,7 +171,20 @@ def _valid_prior(prior: dict, tasks: list[tuple], *, expected_status: str,
             or prior.get("transcript_sha256") != video.transcript_sha256
             or prior.get("model_sha256") != model_sha256
             or prior.get("transcript_hash_status") != video.transcript_hash_status
+            or prior.get("transcript_hash_claim") != video.transcript_hash_claim
             or prior.get("source_integrity_warning") is not (video.transcript_hash_status == "legacy_claim_mismatch")
+            or prior.get("title") != video.title
+            or prior.get("channel") != video.channel
+            or prior.get("published_date") != video.published_date
+            or prior.get("url") != video.url
+            or prior.get("authority") != video.authority
+            or prior.get("route_candidates") != list(video.routes)
+            or prior.get("provenance") != video.provenance
+            or prior.get("comments_status") != video.comments_status
+            or type(prior.get("comment_count")) is not int
+            or prior["comment_count"] != len(video.comments)
+            or type(prior.get("transcript_characters")) is not int
+            or prior["transcript_characters"] != len(video.transcript)
             or prior.get("policy_version") != POLICY_VERSION):
         return False
     permitted = {"review_in_progress", "blocked_local_model", "blocked_time_budget",

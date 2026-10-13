@@ -38,6 +38,9 @@
     "Human and current primary-source verification required before acceptance",
     "A model result alone is never complete expert verification",
     "Partial, missing and blocked outcomes remain explicit",
-    "Legacy Library transcript digest mismatch is labeled; cannot become verified knowledge without independent source integrity evidence"
-  ]
+    "Legacy Library transcript digest mismatch is labeled; cannot become verified knowledge without independent source integrity evidence",
+    "Historical existing-corpus transcript intake is bounded to 3,000,000 UTF-8 bytes per video (no truncation); the separate network acquisition toolkit contract is unchanged.",
+    "Resume from a prior Corpus Knowledge Review run only when workflow_dispatch main and the exact immutable current main SHA match; otherwise fail closed."
+  ],
+  "max_transcript_utf8_bytes": 3000000
 }

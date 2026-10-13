@@ -457,6 +457,64 @@ class CorpusTests(unittest.TestCase):
             self.assertFalse(result.get("resumed", False))
             self.assertGreater(len(fake.calls), before)
 
+    def test_checkpoint_cannot_forge_saved_current_source_metadata(self):
+        transcript = "All evidence must agree with the actual current source metadata. " * 20
+        video = Video("ABCDEFGHIJK", "Fixture", "Channel", "20261013", "https://example.com",
+                      "unknown", ("design",), transcript, ("A comment",),
+                      sha256(transcript), "ok", "fixture")
+        for field, replacement in (("comments_status", "access_blocked"),
+                                   ("comment_count", 0), ("comment_count", True),
+                                   ("transcript_characters", 3),
+                                   ("transcript_hash_claim", "bogus"),
+                                   ("title", "Forgery"),
+                                   ("published_date", "19990101"),
+                                   ("route_candidates", ["seo"])):
+            with self.subTest(field=field, value=replacement), tempfile.TemporaryDirectory() as d:
+                fake = FakeModel()
+                previous = review_video(video, model=fake, model_sha256="a" * 64,
+                                        out_dir=Path(d), chunk_size=510)
+                previous[field] = replacement
+                path = Path(d) / "videos" / "ABCDEFGHIJK.json"
+                path.write_text(json.dumps(previous), encoding="utf-8")
+                old_calls = len(fake.calls)
+                updated = review_video(video, model=fake, model_sha256="a" * 64,
+                                       out_dir=Path(d), chunk_size=510)
+                self.assertFalse(updated.get("resumed", False))
+                self.assertGreater(len(fake.calls), old_calls)
+
+    def test_comment_status_change_invalidates_resumed_video(self):
+        # The same saved comment text can have a changed acquisition status.
+        transcript = "Product reviews require transparent source context. " * 17
+        kwargs = dict(video_id="ABCDEFGHIJK", title="Fixture", channel="Source",
+                      published_date="", url="", authority="unknown", routes=(),
+                      transcript=transcript, comments=("Question about a source.",),
+                      transcript_sha256=sha256(transcript), provenance="fixture")
+        unavailable = Video(**kwargs, comments_status="access_blocked")
+        available = Video(**kwargs, comments_status="ok")
+        self.assertNotEqual(signature(unavailable, "a" * 64), signature(available, "a" * 64))
+        with tempfile.TemporaryDirectory() as d:
+            fake = FakeModel()
+            first = review_video(unavailable, model=fake, model_sha256="a" * 64,
+                                 out_dir=Path(d), chunk_size=510)
+            self.assertEqual(first["comments_status"], "access_blocked")
+            initial_calls = len(fake.calls)
+            current = review_video(available, model=fake, model_sha256="a" * 64,
+                                   out_dir=Path(d), chunk_size=510)
+            self.assertEqual(current["comments_status"], "ok")
+            self.assertFalse(current.get("resumed", False))
+            self.assertGreater(len(fake.calls), initial_calls)
+
+    def test_large_transcript_boundary_is_in_addon_contract_only(self):
+        from knowledge_analysis.corpus import MAX_TRANSCRIPT
+        root = Path(__file__).resolve().parents[1]
+        addon = json.loads((root / "knowledge-analysis-contract.json").read_text())
+        assert MAX_TRANSCRIPT == 3_000_000
+        self.assertEqual(addon["max_transcript_utf8_bytes"], MAX_TRANSCRIPT)
+        original = json.loads((root / "toolkit-contract.json").read_text()) if (root / "toolkit-contract.json").is_file() else None
+        if original is not None:
+            self.assertNotIn("max_transcript_utf8_bytes", original)
+            self.assertEqual(original["capability_id"], "public-youtube-channel-caption-corpus")
+
     def test_previous_run_requires_same_trusted_main_revision(self):
         # The previous run's name alone does not authenticate its results.
         root = Path(__file__).resolve().parents[1]
@@ -498,9 +556,16 @@ class CorpusTests(unittest.TestCase):
         prior = {"schema_version": "1.0", "policy_version": POLICY_VERSION,
                  "video_id": video.video_id, "transcript_sha256": video.transcript_sha256,
                  "model_sha256": model_sha, "transcript_hash_status": "match",
+                 "transcript_hash_claim": video.transcript_hash_claim,
                  "source_integrity_warning": False, "title": video.title,
                  "channel": video.channel, "url": video.url,
-                 "provenance": video.provenance, "status": STATUS_COMPLETE,
+                 "published_date": video.published_date,
+                 "authority": video.authority, "route_candidates": list(video.routes),
+                 "provenance": video.provenance,
+                 "comments_status": video.comments_status,
+                 "comment_count": len(video.comments),
+                 "transcript_characters": len(video.transcript),
+                 "status": STATUS_COMPLETE,
                  "chunks": chunks, "claims": claims,
                  "rejected_unanchored_claims": 0,
                  "auto_promoted": False, "human_qa_approved": False,

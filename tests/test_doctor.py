@@ -100,5 +100,27 @@ class DoctorTests(unittest.TestCase):
         finally:
             td.cleanup()
 
+    def test_knowledge_review_transcript_limit_drift_is_detected(self):
+        td, root = self.copied_tree()
+        try:
+            path = root / 'knowledge-analysis-contract.json'
+            data = json.loads(path.read_text(encoding='utf-8'))
+            data['max_transcript_utf8_bytes'] = 2_000_000
+            path.write_text(json.dumps(data), encoding='utf-8')
+            result = m.run_checks(root)
+            self.assertFalse(result['ok'])
+            self.assertTrue(any('historical transcript limit' in issue for issue in result['failures']))
+            data['max_transcript_utf8_bytes'] = 3_000_000
+            path.write_text(json.dumps(data), encoding='utf-8')
+            source = root / 'knowledge_analysis/corpus.py'
+            source.write_text(source.read_text(encoding='utf-8').replace(
+                'MAX_TRANSCRIPT = 3_000_000', 'MAX_TRANSCRIPT = 2_000_000'
+            ), encoding='utf-8')
+            result = m.run_checks(root)
+            self.assertFalse(result['ok'])
+            self.assertTrue(any('historical transcript limit code/contract' in issue for issue in result['failures']))
+        finally:
+            td.cleanup()
+
 if __name__ == '__main__':
     unittest.main()

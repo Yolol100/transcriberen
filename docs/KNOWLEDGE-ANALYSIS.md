@@ -26,6 +26,12 @@ Downloaded run artifacts are **untrusted input**. Before reusing a previous vide
 
 Some verified historical master-shard transcripts exceed 2 MB; the importer accepts complete UTF-8 text up to a bounded 3 MB per-video limit. It still rejects over-limit items rather than truncating them. These are evidence-integrity fixes, not a broader YouTube acquisition policy or knowledge-promotion authorization.
 
+## Provenance and bounded historical-corpus intake
+
+Retrospective video transcripts are accepted only up to **3,000,000 UTF-8 bytes per video**, without truncation. This historical evidence limit is recorded in `knowledge-analysis-contract.json`, validated by the repository doctor, and is separate from the unchanged public channel acquisition contract. Previously analyzed source bytes are never silently discarded.
+
+A previous `Corpus Knowledge Review` result is resumable only when its GitHub run originated from **`workflow_dispatch` on `main` at the identical immutable code commit (`GITHUB_SHA`)**. The review additionally checks the current source metadata, full transcript/comment digests, comment retrieval status, analysis policy, model digest, chunk spans and anchored evidence against the original text. Old or tampered checkpoints are reprocessed or explicitly rejected; a zero-claim chunk is not automatically proof of factual verification.
+
 ## Evidence boundaries
 
 - `inventory_only`: archive/input identity and batch selection checked; no semantic review.
