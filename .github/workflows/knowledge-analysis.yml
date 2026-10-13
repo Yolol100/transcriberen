@@ -9,6 +9,7 @@ on:
       - scripts/knowledge_source.sh
       - scripts/knowledge_analyze.py
       - tests/test_knowledge_analysis.py
+      - tests/test_knowledge_volume.py
       - tests/test_knowledge_phase4.py
       - scripts/knowledge_phase4.py
       - knowledge-analysis-contract.json
