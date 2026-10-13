@@ -2,6 +2,7 @@
 # Read-only download of a corpus already present as an artifact/release in THIS repo.
 set -euo pipefail
 KIND="${1:?run or release}"; ID="${2:?GitHub run ID or release tag}"; DEST="${3:?output dir}"
+MASTER_SHA="${4:-}"
 : "${GITHUB_REPOSITORY:?run only under GitHub Actions}" "${GH_TOKEN:?GitHub-generated workflow token required}"
 test "$GITHUB_REPOSITORY" = 'Yolol100/transcriberen' || { echo 'wrong repository' >&2; exit 2; }
 mkdir -p "$DEST"
@@ -33,12 +34,22 @@ case "$KIND" in
     ;;
   release)
     [[ "$ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{2,79}$ ]] || { echo 'invalid release tag' >&2; exit 2; }
-    # User has to explicitly supply archive assets to a release. Never publish local Library material implicitly.
-    gh release download "$ID" --repo "$GITHUB_REPOSITORY" --pattern 'YouTube_Kennisbron_Master.part-*.zip' --dir "$DEST" --clobber
-    gh release download "$ID" --repo "$GITHUB_REPOSITORY" --pattern 'YouTube_Kennisbron_Master.zip' --dir "$DEST" --clobber
-    test -f "$DEST/YouTube_Kennisbron_Master.zip" || exit 2
-    mapfile -d '' inputs < <(find "$DEST" -maxdepth 1 -type f -name 'YouTube_Kennisbron_Master.part-*.zip' -print0 | sort -z)
-    test "${#inputs[@]}" -gt 0 || { echo 'no corpus shards in GitHub release' >&2; exit 2; }
+    # A single, owner-supplied ZIP may contain the same SHA-pinned master
+    # and all shard ZIPs. GitHub cannot see a ZIP merely attached to ChatGPT;
+    # it MUST already exist as an authorized release asset. Public releases
+    # are not suitable for rights-restricted or private source archives.
+    if gh release download "$ID" --repo "$GITHUB_REPOSITORY" --pattern 'YouTube_Kennisbron_Bundle.zip' --dir "$DEST" --clobber 2>/dev/null; then
+      test -n "$MASTER_SHA" || { echo 'pinned master SHA-256 required for owner ZIP' >&2; exit 2; }
+      python scripts/knowledge_bundle.py --bundle "$DEST/YouTube_Kennisbron_Bundle.zip" --dest "$DEST" --master-sha256 "$MASTER_SHA"
+      mapfile -t inputs < "$DEST/INPUT-FILES.txt"
+    else
+      test ! -e "$DEST/YouTube_Kennisbron_Bundle.zip" || { echo 'partial owner bundle is invalid' >&2; exit 2; }
+      gh release download "$ID" --repo "$GITHUB_REPOSITORY" --pattern 'YouTube_Kennisbron_Master.part-*.zip' --dir "$DEST" --clobber
+      gh release download "$ID" --repo "$GITHUB_REPOSITORY" --pattern 'YouTube_Kennisbron_Master.zip' --dir "$DEST" --clobber
+      test -f "$DEST/YouTube_Kennisbron_Master.zip" || exit 2
+      mapfile -d '' inputs < <(find "$DEST" -maxdepth 1 -type f -name 'YouTube_Kennisbron_Master.part-*.zip' -print0 | sort -z)
+      test "${#inputs[@]}" -gt 0 || { echo 'no corpus shards in GitHub release' >&2; exit 2; }
+    fi
     ;;
   *) echo 'unsupported source kind' >&2; exit 2 ;;
 esac
