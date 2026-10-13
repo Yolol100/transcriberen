@@ -74,20 +74,20 @@ Tests use deterministic fake inference responses, never a network model or YouTu
 
 ## Phase 4: source-bound claim comparison without automatic knowledge updates
 
-The model reads transcript/comment chunks. Its per-video \`claims\` are hypotheses,
+The model reads transcript/comment chunks. Its per-video `claims` are hypotheses,
 not an authoritative assessment of Webactueel, WordPress, or any external product.
-Only the central \`webactueel-workflow\` owner may coordinate project-source
+Only the central `webactueel-workflow` owner may coordinate project-source
 comparison and promotion. The source contents are intentionally **not** copied
 into this public repository or sent to a hosted AI service.
 
 When a real owner-authorized review run has produced compact video JSON files,
 run the offline **read-only** classification preparation step from trusted source:
 
-\`\`\`bash
+```bash
 python scripts/knowledge_phase4.py \
   --reviews-dir "$RUNNER_TEMP/results/videos" \
   --out "$RUNNER_TEMP/results/phase4-proposals.json"
-\`\`\`
+```
 
 GitHub Actions now emits this evidence-only proposal ledger after a fully successful
 local AI slice. PRs additionally exercise it after a real SHA-pinned Qwen3
@@ -98,31 +98,31 @@ full-corpus phase-4 ledger or finished review. GitHub Actions artifacts expire.
 **Four proposed categories** (all require later independent project-source and
 specialist review; none means accepted, promoted or auto-written):
 
-- \`UPDATE\`: genuinely new candidate; require exactly one specialist owner,
+- `UPDATE`: genuinely new candidate; require exactly one specialist owner,
   a verified current project-source ID + SHA-256, a dated official HTTPS source,
   concrete rationale and subsequent external QA approval. Submitted fields alone
   never prove that the sources were checked.
-- \`ALREADY_COVERED\`: claim apparently covered by an existing project rule; cite
+- `ALREADY_COVERED`: claim apparently covered by an existing project rule; cite
   its current source ID/hash and explain the match; no duplicate source write.
-- \`REJECTED\`: non-transferable, conflicting, misleading, stale or unsupported
+- `REJECTED`: non-transferable, conflicting, misleading, stale or unsupported
   claim with an explicit rationale. A model comment is never a creator quotation.
-- \`NEEDS_VERIFICATION\`: safe **default**; includes unknown/partial access,
+- `NEEDS_VERIFICATION`: safe **default**; includes unknown/partial access,
   missing source comparisons, mutable platform facts and unreviewed claims.
 
-To import *reviewer-proposed* categories offline, supply \`--decisions decisions.json\`
-(an array with each \`claim_id\`, \`category\`, \`rationale\`, and, where required,
-\`project_source_id\`, \`project_source_sha256\`, \`owner\`,
-\`official_source_url\`, \`official_checked_at\`). The decision file must
+To import *reviewer-proposed* categories offline, supply `--decisions decisions.json`
+(an array with each `claim_id`, `category`, `rationale`, and, where required,
+`project_source_id`, `project_source_sha256`, `owner`,
+`official_source_url`, `official_checked_at`). The decision file must
 remain outside committed repository/project sources until reviewed by the
 right owner. Its URLs/hashes are untrusted references, not source readback.
-A legacy transcript digest mismatch forbids \`UPDATE\` proposals pending
+A legacy transcript digest mismatch forbids `UPDATE` proposals pending
 source remediation; partially reviewed videos are excluded.
 
 The output deliberately retains
-\`external_project_sources_fetched=false\`,
-\`official_sources_checked_by_tool=false\`,
-\`human_qa_approved=false\`, \`auto_promoted=false\`, and
-\`source_quote_rechecked_against_raw_transcript=false\`. All four category
+`external_project_sources_fetched=false`,
+`official_sources_checked_by_tool=false`,
+`human_qa_approved=false`, `auto_promoted=false`, and
+`source_quote_rechecked_against_raw_transcript=false`. All four category
 labels are **proposals**. The owner must separately verify the exact
 Library/Drive source, its version/hash, the underlying evidence excerpt,
 the current primary official source and real runtime scope; then perform
