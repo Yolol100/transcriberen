@@ -68,6 +68,12 @@ def _require_chunk_coverage(video: dict) -> None:
         raise Phase4Error("missing or inconsistent source chunk coverage counters")
     if (video["status"] == STATUS_NO_TRANSCRIPT_COMMENTS) != (t_chars == 0):
         raise Phase4Error("transcript/comment-only completion status mismatch")
+    if t_chars > 0 and t_count == 0:
+        raise Phase4Error("transcript chunks missing for nonempty transcript")
+    if t_chars == 0 and t_count != 0:
+        raise Phase4Error("empty transcript cannot have processed transcript chunks")
+    if video["status"] == STATUS_NO_TRANSCRIPT_COMMENTS and comments == 0:
+        raise Phase4Error("empty comments cannot be labelled comments-reviewed")
     by_group = defaultdict(list)
     expected_claims = {}
     rejected_total = 0

@@ -216,6 +216,34 @@ class Phase4Tests(unittest.TestCase):
         with self.assertRaisesRegex(Phase4Error, "rejection counter"):
             triage([video])
 
+    def test_complete_transcript_cannot_be_replaced_with_only_comment_chunks(self):
+        # Regression: previous coverage gate compared reported chunk counts,
+        # but never required any transcript span when transcript_characters > 0.
+        video = fixture()
+        video["transcript_chunks_expected"] = 0
+        video["comment_count"] = 1
+        video["comment_chunks_expected"] = 1
+        video["chunks"][0]["source"] = "comment"
+        video["chunks"][0]["comment_index"] = 0
+        video["claims"][0]["source"] = "comment"
+        video["claims"][0]["comment_index"] = 0
+        video["claims"][0]["creator_attribution"] = False
+        with self.assertRaisesRegex(Phase4Error, "transcript chunks missing"):
+            triage([video])
+
+    def test_empty_video_cannot_claim_comments_only_review_completed(self):
+        # review_video classifies this as no_transcript, not comments-reviewed.
+        video = fixture()
+        video["status"] = STATUS_NO_TRANSCRIPT_COMMENTS
+        video["transcript_characters"] = 0
+        video["transcript_chunks_expected"] = 0
+        video["comment_count"] = 0
+        video["comment_chunks_expected"] = 0
+        video["chunks"] = []
+        video["claims"] = []
+        with self.assertRaisesRegex(Phase4Error, "empty comments"):
+            triage([video])
+
     def test_a_missing_saved_comment_chunk_is_not_considered_complete(self):
         video = fixture()
         video["comment_count"] = 1
