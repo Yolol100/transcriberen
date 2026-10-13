@@ -7,7 +7,7 @@ import sys
 import unittest
 
 from knowledge_analysis.phase4 import Phase4Error, triage
-from knowledge_analysis.review import POLICY_VERSION, STATUS_COMPLETE, STATUS_SOURCE_WARNING
+from knowledge_analysis.review import POLICY_VERSION, STATUS_COMPLETE, STATUS_SOURCE_WARNING, STATUS_NO_TRANSCRIPT_COMMENTS
 
 
 def fixture():
@@ -17,10 +17,18 @@ def fixture():
         "signature": "a" * 64, "video_id": "ABCDEFGHIJK",
         "model_sha256": "b" * 64, "transcript_sha256": "c" * 64,
         "status": STATUS_COMPLETE, "source_integrity_warning": False,
+        "transcript_hash_status": "match",
         "auto_promoted": False, "human_qa_approved": False,
         "project_source_compared": False, "primary_sources_verified": False,
         "transcript_read_completely": True, "comments_read_completely": True,
         "comments_status": "unknown",
+        "transcript_characters": 240,
+        "transcript_chunks_expected": 1, "comment_chunks_expected": 0,
+        "comment_count": 0, "rejected_unanchored_claims": 0,
+        "chunks": [{"source": "transcript", "comment_index": None,
+                    "start": 0, "end": 240, "sha256": "e" * 64,
+                    "model_result": "parsed_and_checked", "valid_claims": 1,
+                    "rejected_claims": 0}],
         "claims": [{
             "claim": "Theme JSON supports documented style and setting controls.",
             "quote": quote, "source": "transcript",
@@ -111,6 +119,13 @@ class Phase4Tests(unittest.TestCase):
         video["claims"][0]["source"] = "comment"
         video["claims"][0]["comment_index"] = 0
         video["claims"][0]["creator_attribution"] = True
+        video["chunks"][0]["source"] = "comment"
+        video["chunks"][0]["comment_index"] = 0
+        video["transcript_characters"] = 0
+        video["transcript_chunks_expected"] = 0
+        video["comment_chunks_expected"] = 1
+        video["comment_count"] = 1
+        video["status"] = STATUS_NO_TRANSCRIPT_COMMENTS
         with self.assertRaisesRegex(Phase4Error, "not a creator"):
             triage([video])
         video["claims"][0]["creator_attribution"] = False
@@ -130,6 +145,7 @@ class Phase4Tests(unittest.TestCase):
         video = fixture()
         video["status"] = STATUS_SOURCE_WARNING
         video["source_integrity_warning"] = True
+        video["transcript_hash_status"] = "legacy_claim_mismatch"
         key = triage([video])["claims"][0]["claim_id"]
         self.assertEqual(triage([video])["claims"][0]["proposed_category"], "NEEDS_VERIFICATION")
         with self.assertRaisesRegex(Phase4Error, "legacy transcript digest"):
@@ -154,6 +170,83 @@ class Phase4Tests(unittest.TestCase):
         video["claims"][0]["evidence_end"] = 9999
         with self.assertRaisesRegex(Phase4Error, "offsets"):
             triage([video])
+
+
+    def test_missing_historical_transcript_digest_is_a_warning_not_a_false_failure(self):
+        video = fixture()
+        video["status"] = STATUS_SOURCE_WARNING
+        video["transcript_hash_status"] = "missing"
+        video["source_integrity_warning"] = False
+        item = triage([video])["claims"][0]
+        self.assertEqual(item["proposed_category"], "NEEDS_VERIFICATION")
+        key = item["claim_id"]
+        with self.assertRaisesRegex(Phase4Error, "legacy transcript digest warning"):
+            triage([video], [proposed("UPDATE", key)])
+
+    def test_forged_complete_review_without_any_saved_chunks_is_rejected(self):
+        video = fixture()
+        del video["chunks"]
+        with self.assertRaisesRegex(Phase4Error, "chunk coverage"):
+            triage([video])
+        video["chunks"] = []
+        with self.assertRaisesRegex(Phase4Error, "chunk coverage"):
+            triage([video])
+
+    def test_complete_review_missing_a_transcript_segment_is_rejected(self):
+        video = fixture()
+        video["chunks"][0]["end"] = 200
+        with self.assertRaisesRegex(Phase4Error, "does not cover"):
+            triage([video])
+
+    def test_a_claim_cannot_point_outside_its_processed_source_chunk(self):
+        video = fixture()
+        quote_len = len(video["claims"][0]["quote"])
+        video["claims"][0]["evidence_start"] = 300
+        video["claims"][0]["evidence_end"] = 300 + quote_len
+        with self.assertRaisesRegex(Phase4Error, "outside its processed"):
+            triage([video])
+
+    def test_completed_chunk_claim_counters_are_checked_not_trusted(self):
+        video = fixture()
+        video["chunks"][0]["valid_claims"] = 0
+        with self.assertRaisesRegex(Phase4Error, "claim counters"):
+            triage([video])
+        video = fixture()
+        video["rejected_unanchored_claims"] = 1
+        with self.assertRaisesRegex(Phase4Error, "rejection counter"):
+            triage([video])
+
+    def test_a_missing_saved_comment_chunk_is_not_considered_complete(self):
+        video = fixture()
+        video["comment_count"] = 1
+        video["comment_chunks_expected"] = 1
+        with self.assertRaisesRegex(Phase4Error, "chunk coverage"):
+            triage([video])
+
+    def test_real_review_video_output_is_accepted_without_fabricated_coverage(self):
+        from knowledge_analysis.corpus import Video, sha256 as source_sha
+        from knowledge_analysis.review import review_video
+        class FakeModel:
+            def ask(self, source, text, metadata):
+                return {"summary": "reviewed", "claims": [{
+                    "claim": "Forms need accessible labels and testing.",
+                    "quote": text[:30],
+                    "owner": "design", "kind": "pattern",
+                    "needs_current_verification": True
+                }]}
+
+        transcript = "Accessibly labelled fields allow keyboard navigation for all visitors. " * 5
+        video = Video("ABCDEFGHIJK", "QA video", "QA channel", "20261013",
+                      "https://www.youtube.com/watch?v=ABCDEFGHIJK", "unknown",
+                      ("design",), transcript, ("Comments should not be creator facts.",),
+                      source_sha(transcript), "ok", "fixture")
+        with tempfile.TemporaryDirectory() as d:
+            result = review_video(video, model=FakeModel(), model_sha256="a" * 64,
+                                  out_dir=Path(d), chunk_size=510)
+            self.assertEqual(result["status"], STATUS_COMPLETE)
+            output = triage([result])
+            self.assertEqual(output["claim_count"], 2)
+            self.assertEqual(output["proposed_category_counts"], {"NEEDS_VERIFICATION": 2})
 
     def test_cli_reads_fixture_and_writes_only_evidence(self):
         with tempfile.TemporaryDirectory() as d:
