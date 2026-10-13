@@ -11,7 +11,22 @@ case "$KIND" in
     # An arbitrary repository workflow artifact is not an accepted caption source.
     run_name="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ID" --jq '.name')"
     run_repo="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ID" --jq '.repository.full_name')"
-    test "$run_name" = 'Transcribe Public Source' && test "$run_repo" = "$GITHUB_REPOSITORY" || { echo 'not this repository transcription run' >&2; exit 2; }
+    run_status="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ID" --jq '.status')"
+    run_conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ID" --jq '.conclusion')"
+    run_event="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ID" --jq '.event')"
+    run_branch="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ID" --jq '.head_branch')"
+    run_path="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ID" --jq '.path')"
+    test "$run_name" = 'Transcribe Public Source' &&
+      test "$run_repo" = "$GITHUB_REPOSITORY" &&
+      test "$run_status" = 'completed' &&
+      test "$run_conclusion" = 'success' &&
+      test "$run_event" = 'push' &&
+      test "$run_branch" = 'runtime-requests' || {
+        echo 'untrusted or unfinished transcription run; source blocked' >&2; exit 2;
+      }
+    test "$run_path" = '.github/workflows/transcribe.yml' || {
+      echo 'untrusted transcription workflow path; source blocked' >&2; exit 2;
+    }
     gh run download "$ID" --repo "$GITHUB_REPOSITORY" --pattern 'transcription-result-*' --dir "$DEST"
     mapfile -d '' inputs < <(find "$DEST" -type f -name 'channel-corpus.zip' -print0)
     test "${#inputs[@]}" -eq 1 || { echo 'expected exactly one channel-corpus.zip artifact' >&2; exit 2; }
