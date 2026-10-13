@@ -39,6 +39,10 @@ on:
         required: true
         default: '0'
         type: string
+      master_sha256:
+        description: 'SHA-256 of authorized same-repo master routing ZIP (required for release shards)'
+        required: false
+        type: string
       resume_run_id:
         description: 'Optional prior Corpus Knowledge Review run containing partial results'
         required: false
@@ -153,7 +157,7 @@ jobs:
           [[ "$BATCH" =~ ^[1-9][0-9]{0,2}$ ]] || exit 2
           [[ "$SLICE" =~ ^(0|[1-9][0-9]?)$ ]] || exit 2
           mapfile -t src < "$RUNNER_TEMP/corpus/INPUT-FILES.txt"
-          python scripts/knowledge_analyze.py --source "${src[@]}" --batch "$BATCH" --slice 0 --slice-size 20 --mode inventory --output-dir "$RUNNER_TEMP/plan"
+          python scripts/knowledge_analyze.py --source "${src[@]}" --batch "$BATCH" --slice 0 --slice-size 20 --mode inventory --master-routing "$RUNNER_TEMP/corpus/YouTube_Kennisbron_Master.zip" --master-sha256 "$MASTER_SHA" --output-dir "$RUNNER_TEMP/plan"
           python - <<'PY'
           import hashlib, json, math, os
           from pathlib import Path
