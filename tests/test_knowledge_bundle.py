@@ -151,6 +151,39 @@ class OwnerBundleTests(unittest.TestCase):
                 prepare_bundle(bundle, output, digest)
             self.assertEqual((output / MASTER).read_bytes(), b"existing master")
 
+
+    def test_existing_github_release_loader_accepts_valid_single_zip(self):
+        """Mock only file transport; run real shell downloader and ZIP validator."""
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            bundle, digest, _ = make_owner_zip(folder)
+            gh = folder / "gh"
+            gh.write_text("""#!/usr/bin/env python3
+import os, pathlib, shutil, sys
+args=sys.argv[1:]
+if args[:2] != ['release', 'download']:
+    raise SystemExit('unexpected gh command')
+pattern=args[args.index('--pattern')+1]
+if pattern != 'YouTube_Kennisbron_Bundle.zip':
+    raise SystemExit('unexpected release pattern')
+destination=pathlib.Path(args[args.index('--dir')+1])
+shutil.copy2(os.environ['MOCK_SOURCE_BUNDLE'], destination/pattern)
+""", encoding="utf-8")
+            gh.chmod(0o755)
+            output = folder / "downloaded"
+            env = dict(__import__("os").environ)
+            env["PATH"] = str(folder) + __import__("os").pathsep + env["PATH"]
+            env["MOCK_SOURCE_BUNDLE"] = str(bundle)
+            env["GITHUB_REPOSITORY"] = "Yolol100/transcriberen"
+            env["GH_TOKEN"] = "fixture-not-a-token"
+            result = subprocess.run([
+                "bash", str(ROOT / "scripts" / "knowledge_source.sh"),
+                "release", "owner-supplied-v1", str(output), digest
+            ], cwd=ROOT, env=env, capture_output=True, text=True, timeout=25)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len((output / "INPUT-FILES.txt").read_text().splitlines()), 2)
+            self.assertEqual(json.loads((output / "INPUT-RECEIPT.json").read_text())["batch_count"], 1)
+
     def test_duplicate_zip_member_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
