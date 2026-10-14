@@ -7,6 +7,8 @@ on:
     paths:
       - .github/workflows/drive-real-slice10.yml
       - scripts/drive_slice10_result.py
+      - scripts/drive_slice10_checkpoint.py
+      - tests/test_live_slice10_resume.py
       - tests/test_live_slice10.py
   workflow_dispatch:
 
@@ -53,24 +55,8 @@ jobs:
         run: python -m scripts.drive_corpus_fetch --folder-id "$SOURCE_FOLDER" --destination "$RUNNER_TEMP/private-v15"
       - name: Boot SHA-pinned local Qwen3 without external inference
         run: bash scripts/knowledge_model.sh "$RUNNER_TEMP/qwen"
-      - name: Review the first ten real videos and all saved chunks
-        shell: bash
-        run: |
-          set -euo pipefail
-          sources=("$RUNNER_TEMP"/private-v15/YouTube_Kennisbron_Master.part-*.zip)
-          test "${#sources[@]}" -eq 15
-          python scripts/knowledge_analyze.py \
-            --source "${sources[@]}" --batch 1 --slice 0 --slice-size 10 --batch-size 500 \
-            --mode review --chunk-size 5600 --time-budget-seconds 16200 \
-            --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
-            --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
-            --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
-            --output-dir "$RUNNER_TEMP/real-ten-video-review"
-          python scripts/knowledge_phase4.py \
-            --reviews-dir "$RUNNER_TEMP/real-ten-video-review/videos" \
-            --out "$RUNNER_TEMP/real-ten-video-review/ledger.json"
-      - name: Refresh OIDC writer credential after model review
-        id: write_auth
+      - name: Temporary Drive writer credential for restoring prior reviews
+        id: restore_auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
         with:
           project_id: transcriberen-511520
@@ -81,9 +67,441 @@ jobs:
           access_token_lifetime: 600s
           create_credentials_file: false
           export_environment_variables: false
-      - name: Verify all ten against original chunks and write private Drive result
+      - name: Restore privately saved prior reviews as untrusted candidates
         env:
-          DRIVE_ACCESS_TOKEN: ${{ steps.write_auth.outputs.access_token }}
+          DRIVE_ACCESS_TOKEN: ${{ steps.restore_auth.outputs.access_token }}
+          RESULTS_FOLDER: 19JA5uzyohsB23WhErZ4g5xZIaFsLkjXa
+        run: python -m scripts.drive_slice10_checkpoint restore --folder-id "$RESULTS_FOLDER" --reviews-dir "$RUNNER_TEMP/real-ten-video-review/videos"
+      - name: Run and locally checkpoint real video 1 of 10
+        id: video_00
+        shell: bash
+        run: |
+          set +e
+          sources=("$RUNNER_TEMP"/private-v15/YouTube_Kennisbron_Master.part-*.zip)
+          test "${#sources[@]}" -eq 15 || exit 2
+          python scripts/knowledge_analyze.py \
+            --source "${sources[@]}" --batch 1 --slice 0 --slice-size 1 --batch-size 500 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
+            --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
+            --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
+            --output-dir "$RUNNER_TEMP/real-ten-video-review"
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Get fresh private Drive credential for video 1
+        id: write_00
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: transcriberen-511520
+          workload_identity_provider: projects/421736271727/locations/global/workloadIdentityPools/github-transcriberen/providers/github-actions
+          service_account: github-transcriberen@transcriberen-511520.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Write and read back private video 1 checkpoint
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.write_00.outputs.access_token }}
+          RESULTS_FOLDER: 19JA5uzyohsB23WhErZ4g5xZIaFsLkjXa
+        run: python -m scripts.drive_slice10_checkpoint persist --folder-id "$RESULTS_FOLDER" --reviews-dir "$RUNNER_TEMP/real-ten-video-review/videos"
+      - name: Refuse advancing if video 1 is incomplete
+        env:
+          EXIT_CODE: ${{ steps.video_00.outputs.exit_code }}
+        run: test "$EXIT_CODE" = '0'
+      - name: Run and locally checkpoint real video 2 of 10
+        id: video_01
+        shell: bash
+        run: |
+          set +e
+          sources=("$RUNNER_TEMP"/private-v15/YouTube_Kennisbron_Master.part-*.zip)
+          test "${#sources[@]}" -eq 15 || exit 2
+          python scripts/knowledge_analyze.py \
+            --source "${sources[@]}" --batch 1 --slice 1 --slice-size 1 --batch-size 500 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
+            --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
+            --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
+            --output-dir "$RUNNER_TEMP/real-ten-video-review"
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Get fresh private Drive credential for video 2
+        id: write_01
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: transcriberen-511520
+          workload_identity_provider: projects/421736271727/locations/global/workloadIdentityPools/github-transcriberen/providers/github-actions
+          service_account: github-transcriberen@transcriberen-511520.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Write and read back private video 2 checkpoint
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.write_01.outputs.access_token }}
+          RESULTS_FOLDER: 19JA5uzyohsB23WhErZ4g5xZIaFsLkjXa
+        run: python -m scripts.drive_slice10_checkpoint persist --folder-id "$RESULTS_FOLDER" --reviews-dir "$RUNNER_TEMP/real-ten-video-review/videos"
+      - name: Refuse advancing if video 2 is incomplete
+        env:
+          EXIT_CODE: ${{ steps.video_01.outputs.exit_code }}
+        run: test "$EXIT_CODE" = '0'
+      - name: Run and locally checkpoint real video 3 of 10
+        id: video_02
+        shell: bash
+        run: |
+          set +e
+          sources=("$RUNNER_TEMP"/private-v15/YouTube_Kennisbron_Master.part-*.zip)
+          test "${#sources[@]}" -eq 15 || exit 2
+          python scripts/knowledge_analyze.py \
+            --source "${sources[@]}" --batch 1 --slice 2 --slice-size 1 --batch-size 500 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
+            --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
+            --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
+            --output-dir "$RUNNER_TEMP/real-ten-video-review"
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Get fresh private Drive credential for video 3
+        id: write_02
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: transcriberen-511520
+          workload_identity_provider: projects/421736271727/locations/global/workloadIdentityPools/github-transcriberen/providers/github-actions
+          service_account: github-transcriberen@transcriberen-511520.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Write and read back private video 3 checkpoint
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.write_02.outputs.access_token }}
+          RESULTS_FOLDER: 19JA5uzyohsB23WhErZ4g5xZIaFsLkjXa
+        run: python -m scripts.drive_slice10_checkpoint persist --folder-id "$RESULTS_FOLDER" --reviews-dir "$RUNNER_TEMP/real-ten-video-review/videos"
+      - name: Refuse advancing if video 3 is incomplete
+        env:
+          EXIT_CODE: ${{ steps.video_02.outputs.exit_code }}
+        run: test "$EXIT_CODE" = '0'
+      - name: Run and locally checkpoint real video 4 of 10
+        id: video_03
+        shell: bash
+        run: |
+          set +e
+          sources=("$RUNNER_TEMP"/private-v15/YouTube_Kennisbron_Master.part-*.zip)
+          test "${#sources[@]}" -eq 15 || exit 2
+          python scripts/knowledge_analyze.py \
+            --source "${sources[@]}" --batch 1 --slice 3 --slice-size 1 --batch-size 500 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
+            --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
+            --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
+            --output-dir "$RUNNER_TEMP/real-ten-video-review"
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Get fresh private Drive credential for video 4
+        id: write_03
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: transcriberen-511520
+          workload_identity_provider: projects/421736271727/locations/global/workloadIdentityPools/github-transcriberen/providers/github-actions
+          service_account: github-transcriberen@transcriberen-511520.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Write and read back private video 4 checkpoint
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.write_03.outputs.access_token }}
+          RESULTS_FOLDER: 19JA5uzyohsB23WhErZ4g5xZIaFsLkjXa
+        run: python -m scripts.drive_slice10_checkpoint persist --folder-id "$RESULTS_FOLDER" --reviews-dir "$RUNNER_TEMP/real-ten-video-review/videos"
+      - name: Refuse advancing if video 4 is incomplete
+        env:
+          EXIT_CODE: ${{ steps.video_03.outputs.exit_code }}
+        run: test "$EXIT_CODE" = '0'
+      - name: Run and locally checkpoint real video 5 of 10
+        id: video_04
+        shell: bash
+        run: |
+          set +e
+          sources=("$RUNNER_TEMP"/private-v15/YouTube_Kennisbron_Master.part-*.zip)
+          test "${#sources[@]}" -eq 15 || exit 2
+          python scripts/knowledge_analyze.py \
+            --source "${sources[@]}" --batch 1 --slice 4 --slice-size 1 --batch-size 500 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
+            --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
+            --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
+            --output-dir "$RUNNER_TEMP/real-ten-video-review"
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Get fresh private Drive credential for video 5
+        id: write_04
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: transcriberen-511520
+          workload_identity_provider: projects/421736271727/locations/global/workloadIdentityPools/github-transcriberen/providers/github-actions
+          service_account: github-transcriberen@transcriberen-511520.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Write and read back private video 5 checkpoint
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.write_04.outputs.access_token }}
+          RESULTS_FOLDER: 19JA5uzyohsB23WhErZ4g5xZIaFsLkjXa
+        run: python -m scripts.drive_slice10_checkpoint persist --folder-id "$RESULTS_FOLDER" --reviews-dir "$RUNNER_TEMP/real-ten-video-review/videos"
+      - name: Refuse advancing if video 5 is incomplete
+        env:
+          EXIT_CODE: ${{ steps.video_04.outputs.exit_code }}
+        run: test "$EXIT_CODE" = '0'
+      - name: Run and locally checkpoint real video 6 of 10
+        id: video_05
+        shell: bash
+        run: |
+          set +e
+          sources=("$RUNNER_TEMP"/private-v15/YouTube_Kennisbron_Master.part-*.zip)
+          test "${#sources[@]}" -eq 15 || exit 2
+          python scripts/knowledge_analyze.py \
+            --source "${sources[@]}" --batch 1 --slice 5 --slice-size 1 --batch-size 500 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
+            --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
+            --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
+            --output-dir "$RUNNER_TEMP/real-ten-video-review"
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Get fresh private Drive credential for video 6
+        id: write_05
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: transcriberen-511520
+          workload_identity_provider: projects/421736271727/locations/global/workloadIdentityPools/github-transcriberen/providers/github-actions
+          service_account: github-transcriberen@transcriberen-511520.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Write and read back private video 6 checkpoint
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.write_05.outputs.access_token }}
+          RESULTS_FOLDER: 19JA5uzyohsB23WhErZ4g5xZIaFsLkjXa
+        run: python -m scripts.drive_slice10_checkpoint persist --folder-id "$RESULTS_FOLDER" --reviews-dir "$RUNNER_TEMP/real-ten-video-review/videos"
+      - name: Refuse advancing if video 6 is incomplete
+        env:
+          EXIT_CODE: ${{ steps.video_05.outputs.exit_code }}
+        run: test "$EXIT_CODE" = '0'
+      - name: Run and locally checkpoint real video 7 of 10
+        id: video_06
+        shell: bash
+        run: |
+          set +e
+          sources=("$RUNNER_TEMP"/private-v15/YouTube_Kennisbron_Master.part-*.zip)
+          test "${#sources[@]}" -eq 15 || exit 2
+          python scripts/knowledge_analyze.py \
+            --source "${sources[@]}" --batch 1 --slice 6 --slice-size 1 --batch-size 500 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
+            --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
+            --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
+            --output-dir "$RUNNER_TEMP/real-ten-video-review"
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Get fresh private Drive credential for video 7
+        id: write_06
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: transcriberen-511520
+          workload_identity_provider: projects/421736271727/locations/global/workloadIdentityPools/github-transcriberen/providers/github-actions
+          service_account: github-transcriberen@transcriberen-511520.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Write and read back private video 7 checkpoint
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.write_06.outputs.access_token }}
+          RESULTS_FOLDER: 19JA5uzyohsB23WhErZ4g5xZIaFsLkjXa
+        run: python -m scripts.drive_slice10_checkpoint persist --folder-id "$RESULTS_FOLDER" --reviews-dir "$RUNNER_TEMP/real-ten-video-review/videos"
+      - name: Refuse advancing if video 7 is incomplete
+        env:
+          EXIT_CODE: ${{ steps.video_06.outputs.exit_code }}
+        run: test "$EXIT_CODE" = '0'
+      - name: Run and locally checkpoint real video 8 of 10
+        id: video_07
+        shell: bash
+        run: |
+          set +e
+          sources=("$RUNNER_TEMP"/private-v15/YouTube_Kennisbron_Master.part-*.zip)
+          test "${#sources[@]}" -eq 15 || exit 2
+          python scripts/knowledge_analyze.py \
+            --source "${sources[@]}" --batch 1 --slice 7 --slice-size 1 --batch-size 500 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
+            --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
+            --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
+            --output-dir "$RUNNER_TEMP/real-ten-video-review"
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Get fresh private Drive credential for video 8
+        id: write_07
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: transcriberen-511520
+          workload_identity_provider: projects/421736271727/locations/global/workloadIdentityPools/github-transcriberen/providers/github-actions
+          service_account: github-transcriberen@transcriberen-511520.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Write and read back private video 8 checkpoint
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.write_07.outputs.access_token }}
+          RESULTS_FOLDER: 19JA5uzyohsB23WhErZ4g5xZIaFsLkjXa
+        run: python -m scripts.drive_slice10_checkpoint persist --folder-id "$RESULTS_FOLDER" --reviews-dir "$RUNNER_TEMP/real-ten-video-review/videos"
+      - name: Refuse advancing if video 8 is incomplete
+        env:
+          EXIT_CODE: ${{ steps.video_07.outputs.exit_code }}
+        run: test "$EXIT_CODE" = '0'
+      - name: Run and locally checkpoint real video 9 of 10
+        id: video_08
+        shell: bash
+        run: |
+          set +e
+          sources=("$RUNNER_TEMP"/private-v15/YouTube_Kennisbron_Master.part-*.zip)
+          test "${#sources[@]}" -eq 15 || exit 2
+          python scripts/knowledge_analyze.py \
+            --source "${sources[@]}" --batch 1 --slice 8 --slice-size 1 --batch-size 500 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
+            --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
+            --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
+            --output-dir "$RUNNER_TEMP/real-ten-video-review"
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Get fresh private Drive credential for video 9
+        id: write_08
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: transcriberen-511520
+          workload_identity_provider: projects/421736271727/locations/global/workloadIdentityPools/github-transcriberen/providers/github-actions
+          service_account: github-transcriberen@transcriberen-511520.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Write and read back private video 9 checkpoint
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.write_08.outputs.access_token }}
+          RESULTS_FOLDER: 19JA5uzyohsB23WhErZ4g5xZIaFsLkjXa
+        run: python -m scripts.drive_slice10_checkpoint persist --folder-id "$RESULTS_FOLDER" --reviews-dir "$RUNNER_TEMP/real-ten-video-review/videos"
+      - name: Refuse advancing if video 9 is incomplete
+        env:
+          EXIT_CODE: ${{ steps.video_08.outputs.exit_code }}
+        run: test "$EXIT_CODE" = '0'
+      - name: Run and locally checkpoint real video 10 of 10
+        id: video_09
+        shell: bash
+        run: |
+          set +e
+          sources=("$RUNNER_TEMP"/private-v15/YouTube_Kennisbron_Master.part-*.zip)
+          test "${#sources[@]}" -eq 15 || exit 2
+          python scripts/knowledge_analyze.py \
+            --source "${sources[@]}" --batch 1 --slice 9 --slice-size 1 --batch-size 500 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
+            --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
+            --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
+            --output-dir "$RUNNER_TEMP/real-ten-video-review"
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Get fresh private Drive credential for video 10
+        id: write_09
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: transcriberen-511520
+          workload_identity_provider: projects/421736271727/locations/global/workloadIdentityPools/github-transcriberen/providers/github-actions
+          service_account: github-transcriberen@transcriberen-511520.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Write and read back private video 10 checkpoint
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.write_09.outputs.access_token }}
+          RESULTS_FOLDER: 19JA5uzyohsB23WhErZ4g5xZIaFsLkjXa
+        run: python -m scripts.drive_slice10_checkpoint persist --folder-id "$RESULTS_FOLDER" --reviews-dir "$RUNNER_TEMP/real-ten-video-review/videos"
+      - name: Refuse advancing if video 10 is incomplete
+        env:
+          EXIT_CODE: ${{ steps.video_09.outputs.exit_code }}
+        run: test "$EXIT_CODE" = '0'
+      - name: Restore exact ten-video inventory and generate evidence-only ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          sources=("$RUNNER_TEMP"/private-v15/YouTube_Kennisbron_Master.part-*.zip)
+          python scripts/knowledge_analyze.py \
+            --source "${sources[@]}" --batch 1 --slice 0 --slice-size 10 --batch-size 500 \
+            --mode inventory --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
+            --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
+            --output-dir "$RUNNER_TEMP/real-ten-video-review" > /dev/null
+          python - <<'PY'
+          import os,json
+          from pathlib import Path
+          from collections import Counter
+          from knowledge_analysis.review import STATUS_COMPLETE, STATUS_SOURCE_WARNING, STATUS_NO_TRANSCRIPT_COMMENTS
+          directory=Path(os.environ["RUNNER_TEMP"])/"real-ten-video-review"
+          path=directory/"inventory.json"
+          inv=json.loads(path.read_text())
+          ids=inv["selected_video_ids"]
+          if len(ids)!=10: raise SystemExit("invalid slice size")
+          reviews=[json.loads((directory/"videos"/(vid+".json")).read_text()) for vid in ids]
+          statuses=dict(Counter(r["status"] for r in reviews))
+          allowed={STATUS_COMPLETE,STATUS_SOURCE_WARNING,STATUS_NO_TRANSCRIPT_COMMENTS,"no_transcript"}
+          if set(statuses)-allowed: raise SystemExit("unverified completion")
+          inv.update(status="evidence_only_pending_external_qa",
+                     model_sha256=reviews[0]["model_sha256"],statuses=statuses,
+                     ai_reviewed_videos=statuses.get(STATUS_COMPLETE,0)+statuses.get(STATUS_SOURCE_WARNING,0),
+                     source_integrity_warning_videos=statuses.get(STATUS_SOURCE_WARNING,0),
+                     comments_only_videos=statuses.get(STATUS_NO_TRANSCRIPT_COMMENTS,0),
+                     human_verified_videos=0,policy_promotions=0)
+          path.write_text(json.dumps(inv,sort_keys=True)+"\n")
+          PY
+          python scripts/knowledge_phase4.py \
+            --reviews-dir "$RUNNER_TEMP/real-ten-video-review/videos" \
+            --out "$RUNNER_TEMP/real-ten-video-review/ledger.json"
+      - name: Fresh final Drive writer credential
+        id: final_auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: transcriberen-511520
+          workload_identity_provider: projects/421736271727/locations/global/workloadIdentityPools/github-transcriberen/providers/github-actions
+          service_account: github-transcriberen@transcriberen-511520.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Verify all ten against the original source and finalize private Drive file
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.final_auth.outputs.access_token }}
           RESULTS_FOLDER: 19JA5uzyohsB23WhErZ4g5xZIaFsLkjXa
           GH_RUN_ID: ${{ github.run_id }}
         run: |
