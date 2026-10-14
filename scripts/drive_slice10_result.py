@@ -121,7 +121,13 @@ def store(folder_id: str, token: str, result: dict) -> dict:
     if not re.fullmatch(r'[A-Za-z0-9_-]{10,200}',str(fid)):
         raise PilotError('invalid_slot_file_id')
     url='https://www.googleapis.com/drive/v3/files/'+fid+'?alt=media'
-    validate_seed(json.loads(api(url,token,max_bytes=4000)))
+    existing=json.loads(api(url,token,max_bytes=LIMIT))
+    from scripts.drive_slice10_checkpoint import valid_checkpoint
+    prior=valid_checkpoint(existing)
+    if prior:
+        verified_by_id={row['video_id']:row for row in result['reviews']}
+        if any(row['video_id'] not in verified_by_id or verified_by_id[row['video_id']]!=row for row in prior):
+            raise PilotError('checkpoint_disagrees_with_source_verified_final_reviews')
     data=(json.dumps(result,sort_keys=True,ensure_ascii=False)+'\n').encode('utf-8')
     if len(data)>LIMIT:
         raise PilotError('private_result_too_large')
