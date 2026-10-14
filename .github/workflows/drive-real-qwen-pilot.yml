@@ -1,0 +1,98 @@
+name: Private v15 Real Qwen Pilot
+
+# Sensitive inputs require verified trusted-main code, never a pull-request runner.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/drive-real-qwen-pilot.yml
+      - scripts/drive_corpus_fetch.py
+      - scripts/drive_pilot_result.py
+      - tests/test_live_pilot.py
+  workflow_dispatch:
+
+concurrency:
+  group: private-v15-first-video-review
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  review-first-real-video:
+    if: github.ref == 'refs/heads/main' && github.repository == 'Yolol100/transcriberen'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 95
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Private pilot guardrail regression tests
+        run: python -m unittest discover -s tests -p 'test_live_pilot.py' -v
+      - name: Issue short-lived Drive input credential
+        id: read_auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: transcriberen-511520
+          workload_identity_provider: projects/421736271727/locations/global/workloadIdentityPools/github-transcriberen/providers/github-actions
+          service_account: github-transcriberen@transcriberen-511520.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive.readonly
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Privately download and SHA-pin original 15 shards plus master
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.read_auth.outputs.access_token }}
+          SOURCE_FOLDER: 14x-AIfgB67Osvt4W_VymAV7jUSqdKaPL
+        run: python -m scripts.drive_corpus_fetch --folder-id "$SOURCE_FOLDER" --destination "$RUNNER_TEMP/private-v15"
+      - name: Prepare SHA-pinned local Qwen3 model (localhost-only)
+        run: bash scripts/knowledge_model.sh "$RUNNER_TEMP/qwen"
+      - name: Review exactly the first real video, all saved chunks
+        shell: bash
+        run: |
+          set -euo pipefail
+          sources=("$RUNNER_TEMP"/private-v15/YouTube_Kennisbron_Master.part-*.zip)
+          test "${#sources[@]}" -eq 15
+          python scripts/knowledge_analyze.py \
+            --source "${sources[@]}" \
+            --batch 1 --slice 0 --slice-size 1 --batch-size 500 \
+            --mode review --chunk-size 5600 --time-budget-seconds 2400 \
+            --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
+            --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
+            --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
+            --output-dir "$RUNNER_TEMP/real-video-review"
+          python scripts/knowledge_phase4.py \
+            --reviews-dir "$RUNNER_TEMP/real-video-review/videos" \
+            --out "$RUNNER_TEMP/real-video-review/ledger.json"
+      - name: Refresh short-lived Drive credential for private result write
+        id: write_auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: transcriberen-511520
+          workload_identity_provider: projects/421736271727/locations/global/workloadIdentityPools/github-transcriberen/providers/github-actions
+          service_account: github-transcriberen@transcriberen-511520.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive
+          access_token_lifetime: 600s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Independently verify all reviewed chunks and store only in private Drive
+        env:
+          DRIVE_ACCESS_TOKEN: ${{ steps.write_auth.outputs.access_token }}
+          RESULTS_FOLDER: 19JA5uzyohsB23WhErZ4g5xZIaFsLkjXa
+          GH_RUN_ID: ${{ github.run_id }}
+        run: |
+          python -m scripts.drive_pilot_result \
+            --source-dir "$RUNNER_TEMP/private-v15" \
+            --output-dir "$RUNNER_TEMP/real-video-review" \
+            --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
+            --results-folder-id "$RESULTS_FOLDER" --run-id "$GH_RUN_ID"
+
+# Do not add upload-artifact or cache steps: private evidence stays in Drive only.
