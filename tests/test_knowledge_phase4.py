@@ -151,6 +151,45 @@ class Phase4Tests(unittest.TestCase):
         with self.assertRaisesRegex(Phase4Error, "legacy transcript digest"):
             triage([video], [proposed("UPDATE", key)])
 
+    def test_identical_model_claim_repetitions_are_audited_not_counted_twice(self):
+        video = fixture()
+        video["claims"].append(dict(video["claims"][0]))
+        video["chunks"][0]["valid_claims"] = 2
+        report = triage([video])
+        self.assertEqual(report["claim_count"], 1)
+        self.assertEqual(report["imported_claim_rows"], 2)
+        self.assertEqual(report["identical_duplicate_claim_rows_excluded"], 1)
+        self.assertEqual(report["proposed_category_counts"], {"NEEDS_VERIFICATION": 1})
+        self.assertFalse(report["auto_promoted"])
+        self.assertFalse(report["human_qa_approved"])
+
+    def test_repeated_claim_cannot_hide_inaccurate_chunk_counts(self):
+        video = fixture()
+        video["claims"].append(dict(video["claims"][0]))
+        with self.assertRaisesRegex(Phase4Error, "claim counters"):
+            triage([video])
+
+    def test_distinct_quote_offsets_remain_distinct_evidence(self):
+        video = fixture()
+        second = dict(video["claims"][0])
+        second["evidence_start"] = 20
+        second["evidence_end"] = 20 + len(second["quote"])
+        video["claims"].append(second)
+        video["chunks"][0]["valid_claims"] = 2
+        report = triage([video])
+        self.assertEqual(report["claim_count"], 2)
+        self.assertEqual(report["identical_duplicate_claim_rows_excluded"], 0)
+
+    def test_manual_proposal_applies_once_to_identical_duplicates(self):
+        video = fixture()
+        video["claims"].append(dict(video["claims"][0]))
+        video["chunks"][0]["valid_claims"] = 2
+        key = triage([video])["claims"][0]["claim_id"]
+        report = triage([video], [proposed("UPDATE", key)])
+        self.assertEqual(report["claim_count"], 1)
+        self.assertEqual(report["claims"][0]["proposed_category"], "UPDATE")
+        self.assertFalse(report["claims"][0]["auto_promoted"])
+
     def test_unknown_or_duplicate_claim_decisions_rejected(self):
         key = triage([fixture()])["claims"][0]["claim_id"]
         with self.assertRaisesRegex(Phase4Error, "unknown phase-4"):
