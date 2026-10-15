@@ -1,31 +1,37 @@
-# Transcriberen — ZIP naar kennisvoorstellen
+# Transcriberen — veilige YouTube-corpuscontrole en kennisvoorstellen
 
-**Gewenste ervaring:** upload één ZIP in ChatGPT of wijs een ZIP in de Library aan. De publieke repository verwerkt de reeds opgeslagen transcripties en reacties per 500 video's; ChatGPT geeft onderbouwde verbeterkandidaten terug voor Webactueel-bronnen en Skills.
+**Status op 15 oktober 2026:** de repository blijft publiek en is een uitvoeringslaag. `webactueel-workflow` blijft de enige controller; live Project Transcriberen is scope-/bronwaarheid en `transcribeer` is de gespecialiseerde intake. Bewaarde YouTube-tekst en comments blijven aanvullende, niet-vertrouwde evidence, nooit automatisch beleid.
 
-## Wat nu bewezen werkt
+## Wat is echt bewezen?
 
-- ZIP-validatie, inclusief de masterindex met 15 shards.
-- Bestaande GitHub-hosted lokale Qwen3-analyse, 500-video-batches met 20-video-slices, evidence-only claims en synthetische CI-tests.
-- GitHub geeft **geen** automatische toestemming om canonieke bronnen of Skills te wijzigen.
+- Het Library-masterarchief **v15** bevat 18.875 unieke video-ID's en verwijst naar **15** aparte, ongewijzigde transcriptshards. De master SHA-256 is `2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59`.
+- Een read-only controle kan **100% van de lokaal opgeslagen video-ID's, transcriptbestanden en opgeslagen comments** valideren. Dit is **geen** 100% dekking van publiek beschikbare YouTube-comments.
+- De vastgelegde bibliotheekbasis bevat **918 video's met bewaarde comments (9.828 top-level comments)** en **17.957 zonder opgeslagen comments**. Voor die laatste video's is niet bewezen dat comments ontbreken of uitstaan.
+- In een echte GitHub-hosted OIDC-run van 14 oktober 2026 was de private Drive-download **15/15 shards PASS**. Qwen verwerkte en bewaarde video 1; video 2 werd `blocked_time_budget` na de toenmalige 1.200 seconden. Zie [run 38496783695](https://github.com/Yolol100/transcriberen/actions/runs/38496783695).
+- De repository heeft synthetische CI en een lokale Qwen3-evidence-only analysemethode. Groene synthetische tests bewijzen geen volledige live transcript-/commentrun.
 
-## Wat nog niet end-to-end werkt
+## Alle 18.875 opgeslagen video's controleren
 
-**De repository blijft public.** De huidige `.github/workflows/review.yml` is een oude *private-repository-only* invoerroute. Ze vereist een ZIP als GitHub Release en weigert te draaien op een publieke repository. Maak ruwe transcript- of comment-ZIP's nooit openbaar om dat te omzeilen.
+Bewaar de ZIPs **privé** en voer lokaal uit met de v15-master plus alle 15 shards in dezelfde map:
 
-De bestaande ChatGPT GitHub-koppeling kan code en kleine tekstverzoeken schrijven en runresultaten lezen, maar **niet** een grote binaire ZIP rechtstreeks veilig naar GitHub Actions uploaden of een dispatch starten. Deze externe overdracht is dus `BLOCKED_TRANSPORT`.
+```bash
+python -m scripts.audit_library_corpus \
+  --master /private/corpus/YouTube_Kennisbron_Master.zip \
+  --shard-dir /private/corpus \
+  --output-dir /private/reports
+```
 
-De beoogde brug is: **ChatGPT-upload → private bronopslag → GitHub Actions met kortlevende, doelgebonden OIDC-toegang → volledige batches → private detailresultaten → ChatGPT-rapport**. Eerst moeten de private opslag/identiteit en het retourkanaal aantoonbaar verbonden zijn. Alleen daarna mag de public-gate veilig worden vervangen.
+Dit schrijft een compacte `coverage_summary.json` en `video_coverage.csv` met per video expliciet **bewaarde commentdekking** en **onbekende live commentbeschikbaarheid**. Het script gebruikt geen netwerk en publiceert geen bronbestanden of reacties in GitHub. Bij een ontbrekend shard, verkeerde hash, duplicate video-ID of commenttelfout is het resultaat `BLOCKED_INCOMPLETE`.
 
-## Bediening na die eenmalige verbinding
+## Nog open / bewust geblokkeerd
 
-1. Upload een ZIP of verwijs naar de Library-versie.
-2. Vraag: **'Analyseer deze ZIP voor verbeteringen in Webactueel-bronnen en Skills.'**
-3. Ontvang per betrokken Skill: `UPDATE`, `ALREADY_COVERED`, `REJECTED` of `NEEDS_VERIFICATION`, inclusief controleerbaar bewijs en ontbrekende verificatie.
+- **100% live YouTube-commentcontrole is niet bewezen.** Een officiële, rechtmatig geautoriseerde provider plus geldige quota, paginering, beschikbaarheids-/privacystatus, rate limits, commentreplies en video-ID-correlatie zijn nodig. `not_stored` is geen synoniem van `comments_disabled`. Zonder bronrespons blijven die 17.957 video-ID's `not_checked`.
+- **Nieuwe publieke YouTube-acquisitie** is onder het actuele live contract `BLOCKED_PROVIDER`. Deze repository is momenteel **geen** publieke YouTube-downloader. Geen cookies/login/proxy/CAPTCHA/PO-token-bypass of media-/audiofallback.
+- De vroegere `.github/workflows/review.yml` vereist een private repository en is daarom niet geschikt op deze publieke repository. De rechtstreekse ChatGPT-upload van een grote ZIP naar een GitHub Actions-run blijft een aparte `BLOCKED_TRANSPORT`-route. De bewezen **GitHub OIDC → private Drive read/write** voor reeds daar aanwezige bronbestanden heft die beperking niet op.
+- De echte tien-video-Qwen-proef is nog **niet end-to-end geslaagd**. De bewaakte workflow bewaart alleen toegestane private checkpoints; een onvolledige video blijft een fout en mag niet als PASS doorgaan.
 
-**Geen online YouTube-acquisitie, geen 38 handmatige batchstarts, geen automatische kennisupdates.**
+## Kennisvergelijking en veiligheid
 
-## Huidige technische tests
+Verschillen met actuele projectbronnen worden voorstellen: `UPDATE`, `ALREADY_COVERED`, `REJECTED` of `NEEDS_VERIFICATION`. Geen automatische promotie naar Skills, Drive-projectwaarheid, Memory of productiecode. Controleer alle materiële of veranderlijke claims eerst bij de vakowner en actuele primaire/officiële bronnen. GitHub/CI is alleen uitvoeringsbewijs.
 
-`python -m unittest discover -s tests -p 'test_*.py' -v`
-
-[Ontwerp- en bevoegdheidsgrens](docs/CHATGPT_HANDOFF.md). De workflow bevat nog geen werkende ChatGPT→GitHub ZIP-overdracht. Groene tests zijn geen bewijs van een voltooide corpusrun.
+Tests: `python -m unittest discover -s tests -p 'test_*.py' -v`. Zie [private handoffgrenzen](docs/CHATGPT_HANDOFF.md) voor de nog niet gerealiseerde rechtstreekse ChatGPT→GitHub-ZIP-overdracht.
