@@ -16,6 +16,7 @@ import zipfile
 from .corpus import CorpusError, VIDEO_ID, Video, _safe_zip
 
 INDEX_NAME = re.compile(r"^YouTube_Video_Routing_Index_[0-9]{4}-[0-9]{2}-[0-9]{2}\.csv$")
+CHANNEL_CATALOG_NAME = re.compile(r"^YouTube_Source_Catalog_[0-9]{4}-[0-9]{2}-[0-9]{2}\.json$")
 DIGEST = re.compile(r"^[a-f0-9]{64}$")
 ROUTE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 REQUIRED_COLUMNS = {
@@ -62,7 +63,20 @@ def load_master_routing(path: Path, expected_sha256: str) -> dict[str, dict]:
             if matches[0].file_size > 12_000_000:
                 raise CorpusError("master routing CSV exceeds limit")
             data = archive.read(matches[0]).decode("utf-8-sig")
-    except (zipfile.BadZipFile, UnicodeError, OSError) as exc:
+            catalog_matches = [item for item in archive.infolist()
+                               if CHANNEL_CATALOG_NAME.fullmatch(item.filename)]
+            if len(catalog_matches) > 1:
+                raise CorpusError("ambiguous master source catalog")
+            channel_catalog = None
+            if catalog_matches:
+                if catalog_matches[0].file_size > 500_000:
+                    raise CorpusError("oversized master source catalog")
+                channel_catalog = json.loads(archive.read(catalog_matches[0]))
+                if (not isinstance(channel_catalog, dict)
+                        or not isinstance(channel_catalog.get("channels"), dict)
+                        or not 1 <= len(channel_catalog["channels"]) <= 500):
+                    raise CorpusError("invalid master source catalog")
+    except (zipfile.BadZipFile, UnicodeError, OSError, json.JSONDecodeError) as exc:
         raise CorpusError("unreadable master routing ZIP") from exc
 
     reader = csv.DictReader(io.StringIO(data, newline=""))
@@ -89,12 +103,31 @@ def load_master_routing(path: Path, expected_sha256: str) -> dict[str, dict]:
             authority, status = row.get("source_authority", ""), row.get("authority_status", "")
             if authority not in ALLOWED_AUTHORITY or status not in ALLOWED_STATUS:
                 raise CorpusError("invalid master authority status")
+            # The immutable v15 video CSV retains old authority values.
+            # The matching channel catalog inside that SAME SHA-pinned ZIP is
+            # the newest validated metadata. Never infer official status from
+            # an older, conflicting video row.
+            resolved_authority = authority or status
+            if channel_catalog is not None:
+                entry = channel_catalog["channels"].get(channel)
+                if not isinstance(entry, dict):
+                    raise CorpusError("master channel missing from source catalog")
+                resolved_status = entry.get("authority_status")
+                resolved_type = entry.get("source_authority")
+                if resolved_status not in ALLOWED_STATUS or (
+                        resolved_status == "verified" and
+                        resolved_type not in (ALLOWED_AUTHORITY - {""})):
+                    raise CorpusError("invalid source catalog channel authority")
+                resolved_authority = (
+                    resolved_type if resolved_status == "verified"
+                    else "unverified_supplemental"
+                )
             comment_count = row.get("comment_count", "")
             if not comment_count.isdecimal() or int(comment_count) > 250:
                 raise CorpusError("invalid master comment count")
             result[video_id] = {
                 "title": title, "channel": channel, "date": date,
-                "routes": tuple(routes), "authority": authority or status,
+                "routes": tuple(routes), "authority": resolved_authority,
                 "comment_count": int(comment_count),
             }
             if len(result) > 25_000:
