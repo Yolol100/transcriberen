@@ -277,6 +277,8 @@ def triage(reviews: list[dict], decisions: list[dict] | None = None) -> dict:
             raise Phase4Error("invalid or duplicate claim decision ID")
         proposed[key] = _validate_decision(decision)
     items, ids, skipped = [], set(), 0
+    identical_duplicates_excluded = 0
+    canonical_candidates = {}
     videos_seen = set()
     for video in reviews:
         if not isinstance(video, dict):
@@ -291,8 +293,15 @@ def triage(reviews: list[dict], decisions: list[dict] | None = None) -> dict:
             item = _candidate(video, claim)
             key = item["claim_id"]
             if key in ids:
-                raise Phase4Error("duplicate imported claim identity")
+                # The model can emit the exact same anchored claim repeatedly.
+                # Checked source-chunk counts above are unchanged. Do not
+                # manufacture independent evidence or promote duplicates.
+                if item != canonical_candidates[key]:
+                    raise Phase4Error("conflicting imported claim identity")
+                identical_duplicates_excluded += 1
+                continue
             ids.add(key)
+            canonical_candidates[key] = dict(item)
             item.update(proposed.get(key, {
                 "proposed_category": "NEEDS_VERIFICATION",
                 "rationale": "Awaiting project-source, official-source and owner comparison",
@@ -314,6 +323,8 @@ def triage(reviews: list[dict], decisions: list[dict] | None = None) -> dict:
         "video_records_provided": len(reviews),
         "incomplete_video_records_excluded": skipped,
         "claim_count": len(items),
+        "imported_claim_rows": len(items) + identical_duplicates_excluded,
+        "identical_duplicate_claim_rows_excluded": identical_duplicates_excluded,
         "proposed_category_counts": counts,
         "source_quote_rechecked_against_raw_transcript": False,
         "external_project_sources_fetched": False,
