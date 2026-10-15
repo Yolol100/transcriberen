@@ -105,6 +105,22 @@ def validate_slice(source_dir: Path, output_dir: Path, model_path: Path, run_id:
             'sources_or_skills_updated':False,'sensitive_content_uploaded_to_github':False}
 
 
+def validate_final_checkpoint(existing: dict, final_reviews: list[dict]) -> int:
+    """Require ten unchanged private checkpoints before final result replacement."""
+    from scripts.drive_slice10_checkpoint import prior_records
+
+    stored = prior_records(existing)
+    if len(stored) != EXPECTED_VIDEOS or len(final_reviews) != EXPECTED_VIDEOS:
+        raise PilotError('incomplete_private_checkpoint')
+    verified = {row.get('video_id'): row for row in final_reviews if isinstance(row, dict)}
+    if len(verified) != EXPECTED_VIDEOS:
+        raise PilotError('duplicate_or_malformed_final_reviews')
+    if any(row.get('video_id') not in verified or verified[row['video_id']] != row
+           for row in stored):
+        raise PilotError('checkpoint_disagrees_with_source_verified_final_reviews')
+    return len(stored)
+
+
 def store(folder_id: str, token: str, result: dict) -> dict:
     if not re.fullmatch(r'[A-Za-z0-9_-]{10,200}',folder_id):
         raise PilotError('bad_folder_locator')
@@ -122,12 +138,7 @@ def store(folder_id: str, token: str, result: dict) -> dict:
         raise PilotError('invalid_slot_file_id')
     url='https://www.googleapis.com/drive/v3/files/'+fid+'?alt=media'
     existing=json.loads(api(url,token,max_bytes=LIMIT))
-    from scripts.drive_slice10_checkpoint import valid_checkpoint
-    prior=valid_checkpoint(existing)
-    if prior:
-        verified_by_id={row['video_id']:row for row in result['reviews']}
-        if any(row['video_id'] not in verified_by_id or verified_by_id[row['video_id']]!=row for row in prior):
-            raise PilotError('checkpoint_disagrees_with_source_verified_final_reviews')
+    validate_final_checkpoint(existing, result['reviews'])
     data=(json.dumps(result,sort_keys=True,ensure_ascii=False)+'\n').encode('utf-8')
     if len(data)>LIMIT:
         raise PilotError('private_result_too_large')
