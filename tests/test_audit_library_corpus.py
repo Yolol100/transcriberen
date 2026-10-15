@@ -12,13 +12,14 @@ from scripts.audit_library_corpus import AuditError, audit
 
 
 class LibraryCorpusAuditTests(unittest.TestCase):
-    def make_corpus(self, root, comment_count=0, listed_hash=None, duplicate=False):
+    def make_corpus(self, root, comment_count=0, listed_hash=None, duplicate=False,
+                    comment_text="a practical question"):
         root = Path(root)
         master = root / "master.zip"
         shard = root / "part-01.zip"
         video = {"_record_type": "youtube_video", "video_id": "abcdefghijk",
                  "channel": "Example", "transcript": "source data",
-                 "comments": [{"text": "a practical question"}] if comment_count else []}
+                 "comments": [{"text": comment_text}] if comment_count else []}
         data = [video, video] if duplicate else [video]
         with zipfile.ZipFile(shard, "w") as z:
             z.writestr("part-01.jsonl", "\n".join(json.dumps(r) for r in data) + "\n")
@@ -58,6 +59,19 @@ class LibraryCorpusAuditTests(unittest.TestCase):
             result = audit(master, Path(d), Path(d) / "out")
             self.assertEqual(result["stored_top_level_comments"], 1)
             self.assertIsNone(result["live_youtube_comment_coverage_pct"])
+
+    def test_reject_blank_saved_comment(self):
+        with tempfile.TemporaryDirectory() as d:
+            master = self.make_corpus(d, comment_count=1, comment_text="  ")
+            with self.assertRaisesRegex(AuditError, "invalid saved comment"):
+                audit(master, Path(d), Path(d) / "out")
+
+    def test_reject_wrong_master_sha(self):
+        with tempfile.TemporaryDirectory() as d:
+            master = self.make_corpus(d)
+            with self.assertRaisesRegex(AuditError, "master checksum"):
+                audit(master, Path(d), Path(d) / "out",
+                      expected_master_sha256="f" * 64)
 
     def test_reject_modified_shard(self):
         with tempfile.TemporaryDirectory() as d:
