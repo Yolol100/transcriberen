@@ -25,5 +25,25 @@ class ResumeChecks(unittest.TestCase):
         x=seed();v={'video_id':'abcdefghijk','model_sha256':MODEL_SHA,'policy_version':'knowledge-review-v5','auto_promoted':False}
         x.update(status='partial_private_checkpoint',model_sha256=MODEL_SHA,reviews=[v,v])
         with self.assertRaises(PilotError):prior_records(x)
+    def test_final_result_requires_exact_verified_ten_video_checkpoint(self):
+        from scripts.drive_slice10_result import validate_final_checkpoint
+        saved = [
+            {'video_id': ('%011d' % n), 'model_sha256': MODEL_SHA,
+             'policy_version': 'knowledge-review-v5', 'auto_promoted': False}
+            for n in range(10)
+        ]
+        item = seed()
+        item.update(status='partial_private_checkpoint', model_sha256=MODEL_SHA, reviews=saved)
+        self.assertEqual(validate_final_checkpoint(item, list(saved)), 10)
+        with self.assertRaisesRegex(PilotError, 'incomplete_private_checkpoint'):
+            validate_final_checkpoint(item, saved[:-1])
+        tampered = [dict(x) for x in saved]
+        tampered[3]['policy_version'] = 'forged-policy'
+        with self.assertRaisesRegex(PilotError, 'checkpoint_disagrees'):
+            validate_final_checkpoint(item, tampered)
+        item['status'] = 'awaiting_review'
+        with self.assertRaises(PilotError):
+            validate_final_checkpoint(item, saved)
+
     def test_invalid_folder_rejected(self):
         with self.assertRaises(PilotError):slot('bad/folder','dummy')
