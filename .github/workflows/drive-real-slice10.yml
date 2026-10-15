@@ -81,7 +81,7 @@ jobs:
           test "${#sources[@]}" -eq 15 || exit 2
           python scripts/knowledge_analyze.py \
             --source "${sources[@]}" --batch 1 --slice 0 --slice-size 1 --batch-size 500 \
-            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1800 \
             --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
             --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
             --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
@@ -119,7 +119,7 @@ jobs:
           test "${#sources[@]}" -eq 15 || exit 2
           python scripts/knowledge_analyze.py \
             --source "${sources[@]}" --batch 1 --slice 1 --slice-size 1 --batch-size 500 \
-            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1800 \
             --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
             --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
             --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
@@ -157,7 +157,7 @@ jobs:
           test "${#sources[@]}" -eq 15 || exit 2
           python scripts/knowledge_analyze.py \
             --source "${sources[@]}" --batch 1 --slice 2 --slice-size 1 --batch-size 500 \
-            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1800 \
             --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
             --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
             --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
@@ -195,7 +195,7 @@ jobs:
           test "${#sources[@]}" -eq 15 || exit 2
           python scripts/knowledge_analyze.py \
             --source "${sources[@]}" --batch 1 --slice 3 --slice-size 1 --batch-size 500 \
-            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1800 \
             --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
             --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
             --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
@@ -233,7 +233,7 @@ jobs:
           test "${#sources[@]}" -eq 15 || exit 2
           python scripts/knowledge_analyze.py \
             --source "${sources[@]}" --batch 1 --slice 4 --slice-size 1 --batch-size 500 \
-            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1800 \
             --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
             --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
             --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
@@ -271,7 +271,7 @@ jobs:
           test "${#sources[@]}" -eq 15 || exit 2
           python scripts/knowledge_analyze.py \
             --source "${sources[@]}" --batch 1 --slice 5 --slice-size 1 --batch-size 500 \
-            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1800 \
             --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
             --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
             --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
@@ -309,7 +309,7 @@ jobs:
           test "${#sources[@]}" -eq 15 || exit 2
           python scripts/knowledge_analyze.py \
             --source "${sources[@]}" --batch 1 --slice 6 --slice-size 1 --batch-size 500 \
-            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1800 \
             --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
             --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
             --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
@@ -347,7 +347,7 @@ jobs:
           test "${#sources[@]}" -eq 15 || exit 2
           python scripts/knowledge_analyze.py \
             --source "${sources[@]}" --batch 1 --slice 7 --slice-size 1 --batch-size 500 \
-            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1800 \
             --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
             --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
             --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
@@ -385,7 +385,7 @@ jobs:
           test "${#sources[@]}" -eq 15 || exit 2
           python scripts/knowledge_analyze.py \
             --source "${sources[@]}" --batch 1 --slice 8 --slice-size 1 --batch-size 500 \
-            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1800 \
             --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
             --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
             --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
@@ -423,7 +423,7 @@ jobs:
           test "${#sources[@]}" -eq 15 || exit 2
           python scripts/knowledge_analyze.py \
             --source "${sources[@]}" --batch 1 --slice 9 --slice-size 1 --batch-size 500 \
-            --mode review --chunk-size 5600 --time-budget-seconds 1200 \
+            --mode review --chunk-size 5600 --time-budget-seconds 1800 \
             --master-routing "$RUNNER_TEMP/private-v15/YouTube_Kennisbron_Master.zip" \
             --master-sha256 2aa93bbe7b1db1d872c9d8614240dbbdf0f0c061e0de5c6e0e753a2954763e59 \
             --model-path "$RUNNER_TEMP/qwen/model/model.gguf" \
