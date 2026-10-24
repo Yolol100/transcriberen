@@ -11,6 +11,10 @@
 - Repository Doctor, CodeQL en de synthetische Qwen-regressies blijven aparte controles. **Één succesvolle echte proef van tien video's** bewijst de werkende privé-Drive-handoff en laatste fase voor die specifieke sample, niet universele corpus-, actualiteits- of menselijke inhoudelijke goedkeuring.
 - Het v15-masterbestand is onveranderd. Het bevat een actueel kanaalcataloguslabel voor 63 geverifieerde kanalen terwijl 13.764 historische video-indexrijen nog een verouderd `unverified_supplemental`-label hadden. Nieuwe runtimebeoordelingen gebruiken de geverifieerde catalogus uit **dezelfde SHA-gepinde master** (PR #84). Dit herlabelt geen reeds opgeslagen historische beoordelingen. Het kanaal Remote Career Scout en zijn 99 video's blijven ongeverifieerd.
 
+## Kennisreview uit een bestaand Excel-transcriptonderzoek
+
+Gebruik de [evidence-only Excel-importfilter](docs/EXCEL-INTAKE-EVIDENCE-RUBRIC.md) om automatische entiteitmatches, frameworknamen en schijnbare tegenspraken eerst te verifiëren. Een gevonden vermelding is geen bevestigde claim. Projectbronnen en Skills blijven ongewijzigd totdat de verantwoordelijke eigenaar de kennis expliciet accepteert.
+
 ## Alle 18.875 opgeslagen video's controleren
 
 Bewaar de ZIPs **privé** en voer lokaal uit met de v15-master plus alle 15 shards in dezelfde map:
