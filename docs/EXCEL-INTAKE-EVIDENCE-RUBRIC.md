@@ -43,7 +43,7 @@ python -m scripts.audit_excel_discovery \\
 
 De uitvoermap mag vooraf **niet bestaan**. De tool leest invoer zonder deze te wijzigen, vereist unieke overeenkomstige video-ID's, accepteert een letterlijk Excel-apostrofeteken voor een verder geldige ID, en blokkeert ongeldige datumvlaggen, beschadigde nulbytes en onveilige inputgroottes. `entity_reviews.csv` is voorlopig alleen voor de bekende ambigue voorbeelden (Microsoft Clarity, RAG, Zero to One, The ONE Thing, Astro en Atomic Habits). Andere namen blijven buiten deze specifieke regelset en worden niet automatisch afgekeurd. `CONTEXT_PRESENT_UNVERIFIED` betekent **geen** bewezen claim; `AMBIGUOUS_NEEDS_REVIEW` betekent **geen** definitieve afwijzing. `date_flag_conflicts.csv` toont afwijkende bronvlaggen zonder publicatiedata of werkboekrijen stil te corrigeren. `summary.json` bewaart alleen tellingen en invoer-SHA's.
 
-Alle uitvoer blijft privaat. Controleer inhoud, officiële bron en vakowner afzonderlijk voordat er zelfs maar een `UPDATE`-voorstel kan worden geaccepteerd. Synthetische regressies: `python -m unittest tests.test_excel_discovery_review -v`.
+Alle uitvoer blijft privaat. Controleer inhoud, officiële bron en vakowner afzonderlijk voordat er zelfs maar een `UPDATE`-voorstel kan worden geaccepteerd. Synthetische regressies: `python -m unittest discover -s tests -p 'test_excel_discovery_review.py' -v`.
 
 ## Reviewrecord (schema-illustratie, geen runtimecontract)
 
