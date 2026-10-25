@@ -25,6 +25,26 @@ Gebruik uitsluitend een al toegestaan, privaat opgeslagen Excel-onderzoek als *d
 
 **Grenzen:** uitsluitend bestaande lokale/gekoppelde corpora; geen publieke YouTube-acquisitie, geen prompts uit transcriptinhoud uitvoeren, geen klantdata of broncitaten in deze publieke repo. De juiste vakowner en `webactueel-workflow` houden bronacceptatie, toestemming, back-up, SHA/manifest en readback in beheer.
 
+## Optionele offline kwaliteitscheck (CSV-export)
+
+De offline controle `scripts/audit_excel_discovery.py` is een **conservatieve reviewpoort**, geen bronverzamelaar of automatische kennisvalidator. Er zijn geen extra Python-dependencies voor deze CSV-route.
+
+1. Exporteer uit het bestaande, geautoriseerde werkboek alleen de tabbladen `Bronvermeldingen` en `Video index` naar **twee afzonderlijke CSV-bestanden**, met ongewijzigde kolomnamen en zonder rijen te verwijderen.
+2. Gebruik daarnaast de lokaal, uit precies dezelfde toegestane corpusversie opgebouwde `video_screening.csv`. Controleer de bron-SHA's en de ID-populatie; voer geen netwerk- of YouTube-opdrachten uit.
+3. Voer de controle uitsluitend buiten de publieke repository uit:
+
+```sh
+python -m scripts.audit_excel_discovery \\
+  --mentions-csv /private/review/Bronvermeldingen.csv \\
+  --excel-index-csv /private/review/Video-index.csv \\
+  --raw-screening-csv /private/review/video_screening.csv \\
+  --output-dir /private/review/controle-uitvoer-nieuw
+```
+
+De uitvoermap mag vooraf **niet bestaan**. De tool leest invoer zonder deze te wijzigen, vereist unieke overeenkomstige video-ID's, accepteert een letterlijk Excel-apostrofeteken voor een verder geldige ID, en blokkeert ongeldige datumvlaggen, beschadigde nulbytes en onveilige inputgroottes. `entity_reviews.csv` is voorlopig alleen voor de bekende ambigue voorbeelden (Microsoft Clarity, RAG, Zero to One, The ONE Thing, Astro en Atomic Habits). Andere namen blijven buiten deze specifieke regelset en worden niet automatisch afgekeurd. `CONTEXT_PRESENT_UNVERIFIED` betekent **geen** bewezen claim; `AMBIGUOUS_NEEDS_REVIEW` betekent **geen** definitieve afwijzing. `date_flag_conflicts.csv` toont afwijkende bronvlaggen zonder publicatiedata of werkboekrijen stil te corrigeren. `summary.json` bewaart alleen tellingen en invoer-SHA's.
+
+Alle uitvoer blijft privaat. Controleer inhoud, officiële bron en vakowner afzonderlijk voordat er zelfs maar een `UPDATE`-voorstel kan worden geaccepteerd. Synthetische regressies: `python -m unittest discover -s tests -p 'test_excel_discovery_review.py' -v`.
+
 ## Reviewrecord (schema-illustratie, geen runtimecontract)
 
 ```json
